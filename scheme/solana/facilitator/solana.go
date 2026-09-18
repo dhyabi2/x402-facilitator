@@ -16,6 +16,7 @@ import (
 	soltypes "github.com/blocto/solana-go-sdk/types"
 	"github.com/mr-tron/base58"
 
+	"github.com/gosuda/x402-facilitator/scheme"
 	"github.com/gosuda/x402-facilitator/types"
 )
 
@@ -23,7 +24,7 @@ import (
 // for TransferChecked (https://spl.solana.com/token).
 const solanaTransferCheckedInstruction = 12
 
-var _ Facilitator = (*SolanaFacilitator)(nil)
+var _ scheme.Facilitator = (*SolanaFacilitator)(nil)
 
 // txSubmitter broadcasts a signed transaction and returns its signature. It
 // exists so tests can stub the Solana RPC boundary.

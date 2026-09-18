@@ -10,10 +10,15 @@ import (
 	"time"
 
 	"github.com/decred/dcrd/dcrec/secp256k1/v4"
+	"github.com/gosuda/x402-facilitator/scheme"
 	"github.com/gosuda/x402-facilitator/scheme/evm"
 	"github.com/gosuda/x402-facilitator/types"
 	"github.com/stretchr/testify/require"
 )
+
+// pins interface conformance; kept in a test file so module-mode builds
+// resolve against published root v0.0.5, which lacks the scheme package.
+var _ scheme.Facilitator = (*EVMFacilitator)(nil)
 
 const (
 	Network = "eip155:84532"

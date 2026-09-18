@@ -7,11 +7,12 @@ import (
 	"os"
 	"strings"
 
+	"github.com/gosuda/x402-facilitator/scheme"
 	casperscheme "github.com/gosuda/x402-facilitator/scheme/casper"
 	"github.com/gosuda/x402-facilitator/types"
 )
 
-var _ Facilitator = (*CasperFacilitator)(nil)
+var _ scheme.Facilitator = (*CasperFacilitator)(nil)
 
 // CasperFacilitatorURLEnv overrides the Casper facilitator base URL when no
 // URL is supplied through configuration.

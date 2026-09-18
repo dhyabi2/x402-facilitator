@@ -11,7 +11,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/stretchr/testify/require"
 
-	"github.com/gosuda/x402-facilitator/facilitator"
+	"github.com/gosuda/x402-facilitator/scheme"
 	"github.com/gosuda/x402-facilitator/types"
 )
 
@@ -40,7 +40,7 @@ func (f *stubFacilitator) Supported() *types.SupportedResponse {
 	}}, Extensions: []string{}, Signers: map[string][]string{}}
 }
 
-var _ facilitator.Facilitator = (*stubFacilitator)(nil)
+var _ scheme.Facilitator = (*stubFacilitator)(nil)
 
 func postJSON(t *testing.T, h http.Handler, path string, body any) *httptest.ResponseRecorder {
 	t.Helper()
