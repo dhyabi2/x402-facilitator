@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/big"
+	"os"
 	"testing"
 	"time"
 
@@ -15,18 +16,30 @@ import (
 )
 
 const (
-	PrivateKey = ""
-	Network    = "eip155:84532"
-	Token      = "USDC"
-	Amount     = "10000"
-	PayTo      = "0x1234567890123456789012345678901234567890"
+	Network = "eip155:84532"
+	Token   = "USDC"
+	Amount  = "10000"
+	PayTo   = "0x1234567890123456789012345678901234567890"
 )
 
+// integrationPrivateKey returns the hex private key for the on-chain
+// integration tests below: they dial live Base Sepolia endpoints and settle
+// broadcasts a real transaction, so they are skipped unless a key is provided.
+func integrationPrivateKey(t *testing.T) string {
+	t.Helper()
+	key := os.Getenv("X402_EVM_TEST_PRIVATE_KEY")
+	if key == "" {
+		t.Skip("X402_EVM_TEST_PRIVATE_KEY not set: skipping on-chain EVM integration test")
+	}
+	return key
+}
+
 func TestEVMVerify(t *testing.T) {
-	facilitator, err := NewEVMFacilitator(Network, "", PrivateKey)
+	key := integrationPrivateKey(t)
+	facilitator, err := NewEVMFacilitator(Network, "", key)
 	require.NoError(t, err)
 
-	privKey, err := hex.DecodeString("")
+	privKey, err := hex.DecodeString(key)
 	require.NoError(t, err)
 	evmPayload, err := evm.NewEVMPayload(Network, Token,
 		"", "", Amount, evm.NewRawPrivateSigner(privKey))
@@ -57,10 +70,11 @@ func TestEVMVerify(t *testing.T) {
 }
 
 func TestEVMSettle(t *testing.T) {
-	facilitator, err := NewEVMFacilitator(Network, "", PrivateKey)
+	key := integrationPrivateKey(t)
+	facilitator, err := NewEVMFacilitator(Network, "", key)
 	require.NoError(t, err)
 
-	privKey, err := hex.DecodeString("")
+	privKey, err := hex.DecodeString(key)
 	require.NoError(t, err)
 	evmPayload, err := evm.NewEVMPayload(Network, Token,
 		"", "", Amount, evm.NewRawPrivateSigner(privKey))
