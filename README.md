@@ -15,7 +15,7 @@ independent axes. This facilitator currently supports:
 
 | Scheme  | `eip155:*` (EVM) | `solana:*` | `sui:*` | `tron:*` | `casper:*` |
 |---------|:----------------:|:----------:|:-------:|:--------:|:----------:|
-| `exact` |        ✅        |     🚧     |   🚧    |    🚧    |     ✅     |
+| `exact` |        ✅        |     ✅     |   🚧    |    🚧    |     ✅     |
 
 Networks are specified in [CAIP-2](https://chainagnostic.org/CAIPs/caip-2)
 format (e.g. `eip155:84532` for Base Sepolia, `eip155:8453` for Base
@@ -36,6 +36,22 @@ facilitator service, so `url` points at that service rather than a node
 RPC endpoint. It defaults to `https://x402-facilitator.cspr.cloud` and can
 be overridden through `url` in `config.toml` or the
 `CASPER_FACILITATOR_URL` environment variable.
+
+### Solana
+
+Solana networks are `solana:mainnet`, `solana:devnet`, and other
+`solana:*` CAIP-2 identifiers; `url` is the Solana JSON-RPC endpoint (for
+example `https://api.devnet.solana.com`). The configured private key is
+the facilitator's fee payer, advertised to payers through the
+`feePayer` extra and the `signers` map of the `/supported` response.
+
+Settlement uses SPL Token `TransferChecked`: the payer builds and signs a
+base64-encoded legacy transaction carrying a single `TransferChecked`
+instruction that moves `amount` base units of the `asset` mint (a base58
+public key) to the associated token account of `payTo`, naming the
+facilitator's fee payer as the transaction fee payer. The facilitator
+verifies the transfer against the payment requirements, co-signs as fee
+payer, and submits the transaction.
 
 ## How to run
 
