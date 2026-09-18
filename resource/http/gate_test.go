@@ -23,6 +23,8 @@ var (
 	_ Facilitator = (*client.Client)(nil)
 )
 
+var testResource = &types.ResourceInfo{URL: "https://resource.example/paid"}
+
 var testRequirements = types.PaymentRequirements{
 	Scheme:            string(types.Exact),
 	Network:           "eip155:84532",
@@ -96,6 +98,7 @@ func newTestGate(t *testing.T, mutate func(*Config)) (*Gate, *stubFacilitator) {
 	cfg := Config{
 		Requirements: testRequirements,
 		Facilitator:  stub,
+		Resource:     testResource,
 	}
 	if mutate != nil {
 		mutate(&cfg)
@@ -118,7 +121,7 @@ func paidRequest(t *testing.T, payload types.PaymentPayload) *http.Request {
 	raw, err := json.Marshal(payload)
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "/resource", nil)
-	req.Header.Set(HeaderXPayment, string(raw))
+	req.Header.Set(HeaderPaymentSignature, string(raw))
 	return req
 }
 
@@ -144,6 +147,8 @@ func TestWrapUnpaidRequestChallenges(t *testing.T) {
 	body := decodeChallenge(t, rec)
 	require.Equal(t, int(types.X402VersionV2), body.X402Version)
 	require.Equal(t, "payment required", body.Error)
+	require.NotNil(t, body.Resource)
+	require.Equal(t, testResource.URL, body.Resource.URL, "challenge must carry the resource metadata")
 	require.Len(t, body.Accepts, 1)
 	require.Equal(t, string(types.Exact), body.Accepts[0].Scheme)
 	require.Equal(t, "eip155:84532", body.Accepts[0].Network)
@@ -198,39 +203,11 @@ func TestWrapPaidRequestSettlesAndForwards(t *testing.T) {
 	require.Equal(t, "0xpayer", settlement.Payer)
 }
 
-func TestWrapMethodFilterPassesOthersThrough(t *testing.T) {
-	gate, stub := newTestGate(t, func(cfg *Config) { cfg.Methods = []string{"POST"} })
-	var forwardedHeader string
-	handler := gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		forwardedHeader = r.Header.Get(HeaderXPayment)
-		w.Write([]byte(r.Method))
-	}))
-
-	get := httptest.NewRequest(http.MethodGet, "/resource", nil)
-	get.Header.Set(HeaderXPayment, "!!!not-a-payment!!!")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, get)
-
-	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, http.MethodGet, rec.Body.String())
-	require.Equal(t, "!!!not-a-payment!!!", forwardedHeader, "unpaid method passes through untouched")
-	require.Zero(t, stub.settleCalls)
-
-	post := httptest.NewRequest(http.MethodPost, "/resource", nil)
-	post.Header.Set(HeaderXPayment, "!!!not-a-payment!!!")
-	rec = httptest.NewRecorder()
-	handler.ServeHTTP(rec, post)
-
-	require.Equal(t, http.StatusPaymentRequired, rec.Code)
-	body := decodeChallenge(t, rec)
-	require.Equal(t, "invalid payment payload", body.Error)
-	require.Zero(t, stub.settleCalls)
-}
-
 func TestWrapSettleTimeoutChallenges(t *testing.T) {
 	gate, err := New(Config{
 		Requirements:   testRequirements,
 		Facilitator:    blockingFacilitator{},
+		Resource:       testResource,
 		RequestTimeout: 20 * time.Millisecond,
 	})
 	require.NoError(t, err)
@@ -244,6 +221,40 @@ func TestWrapSettleTimeoutChallenges(t *testing.T) {
 	require.False(t, downstream, "timed-out settlement must not reach the resource")
 	body := decodeChallenge(t, rec)
 	require.Equal(t, "payment settlement failed", body.Error)
+}
+
+// The settle deadline must bound only the facilitator call: a slow
+// facilitator that still succeeds must hand the resource handler the
+// inbound request context, not a cancelled or deadline-bounded one.
+func TestWrapSettleDeadlineDoesNotPropagate(t *testing.T) {
+	slow := &stubFacilitator{settleFn: func() (*types.PaymentSettleResponse, error) {
+		time.Sleep(80 * time.Millisecond) // outlasts the settle deadline, then succeeds
+		return testSettleResponse, nil
+	}}
+	gate, err := New(Config{
+		Requirements:   testRequirements,
+		Facilitator:    slow,
+		Resource:       testResource,
+		RequestTimeout: 50 * time.Millisecond,
+	})
+	require.NoError(t, err)
+
+	var deadline time.Time
+	var hasDeadline bool
+	var ctxErr error
+	handler := gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		deadline, hasDeadline = r.Context().Deadline()
+		ctxErr = r.Context().Err()
+	}))
+
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, paidRequest(t, v2Payload()))
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, 1, slow.settleCalls)
+	require.False(t, hasDeadline, "settle deadline must not bound resource execution")
+	require.Zero(t, deadline)
+	require.NoError(t, ctxErr)
 }
 
 func TestWrapRejectedSettlementChallenges(t *testing.T) {

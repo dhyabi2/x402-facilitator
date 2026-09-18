@@ -5,6 +5,20 @@
 // runs, publishes the settlement receipt, and strips all payment traffic
 // before the application handler sees the request. Chain specifics live in
 // the facilitator implementation, not here.
+//
+// Supported wire contract (phase 1):
+//
+//   - inbound payment header: canonical v2 PAYMENT-SIGNATURE, with the
+//     legacy X-PAYMENT accepted as a fallback when the canonical header is
+//     absent;
+//   - payment flow: settle-before-resource only (PaymentFlowSettleBeforeResource).
+//     Flows such as verify/resource/settle are out of scope and rejected at
+//     configuration time rather than silently mis-orchestrated;
+//   - the 402 challenge always carries resource metadata: Config.Resource
+//     (with URL) is required.
+//
+// Which routes or HTTP methods are paid is application policy: wrap exactly
+// the handlers that should be paid.
 package x402http
 
 import (
@@ -12,6 +26,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -36,6 +51,14 @@ const (
 	reasonSettleFailed    = "payment settlement failed"
 )
 
+// PaymentFlowSettleBeforeResource is the only payment flow this phase
+// supports: the payment is fully settled before the resource handler runs.
+// Flows that interleave verification and resource execution (e.g.
+// verify/resource/settle) are intentionally not implemented here and are
+// rejected at configuration time, so adopting them later is an additive
+// change instead of a redesign of Wrap.
+const PaymentFlowSettleBeforeResource = "settle-before-resource"
+
 // Facilitator is the settlement backend the gate drives. Both the local
 // facilitators and the remote api/client.Client satisfy it.
 type Facilitator interface {
@@ -46,18 +69,22 @@ type Facilitator interface {
 // Config owns one x402 payment contract and its facilitator runtime.
 type Config struct {
 	// Requirements is the accepted payment contract: advertised in the 402
-	// accepts list and passed to Settle. Scheme, Network, Amount, and PayTo
-	// are required; a non-positive MaxTimeoutSeconds defaults to 60.
+	// accepts list and passed to Settle. Scheme, Network, Asset, Amount, and
+	// PayTo are required; a non-positive MaxTimeoutSeconds defaults to 60.
 	Requirements types.PaymentRequirements
 
 	// Facilitator settles accepted payments. Required.
 	Facilitator Facilitator
 
-	// Resource, when set, is embedded into the 402 challenge body.
+	// Resource describes the paid resource and is embedded into every 402
+	// challenge; a URL is required, because the v2 payment-required shape
+	// advertises it. Use the public URL a paying client can reach.
 	Resource *types.ResourceInfo
 
-	// Methods lists the paid HTTP methods. Empty pays every method.
-	Methods []string
+	// PaymentFlow selects the orchestration the gate performs. Empty
+	// defaults to PaymentFlowSettleBeforeResource, the only supported flow;
+	// any other value is a configuration error.
+	PaymentFlow string
 
 	// RequestTimeout bounds each Settle call. Zero defaults to 30s; a
 	// negative value is a configuration error.
@@ -68,8 +95,8 @@ type Config struct {
 type Gate struct {
 	facilitator    Facilitator
 	requirements   types.PaymentRequirements
-	resource       *types.ResourceInfo
-	methods        map[string]struct{}
+	resource       types.ResourceInfo
+	paymentFlow    string
 	requestTimeout time.Duration
 }
 
@@ -85,6 +112,8 @@ func New(cfg Config) (*Gate, error) {
 		return nil, errors.New("x402http: requirements.scheme is required")
 	case strings.TrimSpace(requirements.Network) == "":
 		return nil, errors.New("x402http: requirements.network is required")
+	case strings.TrimSpace(requirements.Asset) == "":
+		return nil, errors.New("x402http: requirements.asset is required")
 	case strings.TrimSpace(requirements.Amount) == "":
 		return nil, errors.New("x402http: requirements.amount is required")
 	case strings.TrimSpace(requirements.PayTo) == "":
@@ -93,13 +122,15 @@ func New(cfg Config) (*Gate, error) {
 	if requirements.MaxTimeoutSeconds <= 0 {
 		requirements.MaxTimeoutSeconds = defaultMaxTimeoutSeconds
 	}
-	methods := make(map[string]struct{}, len(cfg.Methods))
-	for _, method := range cfg.Methods {
-		method = strings.TrimSpace(method)
-		if method == "" {
-			return nil, errors.New("x402http: methods entries must be non-blank")
-		}
-		methods[method] = struct{}{}
+	if cfg.Resource == nil || strings.TrimSpace(cfg.Resource.URL) == "" {
+		return nil, errors.New("x402http: resource with a URL is required for the 402 challenge")
+	}
+	paymentFlow := cfg.PaymentFlow
+	if paymentFlow == "" {
+		paymentFlow = PaymentFlowSettleBeforeResource
+	}
+	if paymentFlow != PaymentFlowSettleBeforeResource {
+		return nil, fmt.Errorf("x402http: unsupported payment flow %q: only %q is supported", paymentFlow, PaymentFlowSettleBeforeResource)
 	}
 	if cfg.RequestTimeout < 0 {
 		return nil, errors.New("x402http: request timeout must not be negative")
@@ -111,8 +142,8 @@ func New(cfg Config) (*Gate, error) {
 	return &Gate{
 		facilitator:    cfg.Facilitator,
 		requirements:   requirements,
-		resource:       cfg.Resource,
-		methods:        methods,
+		resource:       *cfg.Resource,
+		paymentFlow:    paymentFlow,
 		requestTimeout: requestTimeout,
 	}, nil
 }
@@ -120,14 +151,11 @@ func New(cfg Config) (*Gate, error) {
 // Wrap gates next behind the payment: requests without a verifiable payment
 // receive the 402 challenge, paid requests are settled before being
 // forwarded, payment headers are stripped from the forwarded request, and the
-// settlement receipt is published as trusted response headers. Methods
-// outside the configured paid methods bypass the gate untouched.
+// settlement receipt is published as trusted response headers. Which routes
+// and methods are paid is application policy: wrap exactly the handlers that
+// should be paid.
 func (g *Gate) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if !g.paidMethod(r.Method) {
-			next.ServeHTTP(w, r)
-			return
-		}
 		payload, ok := g.paymentPayloadFromRequest(w, r)
 		if !ok {
 			return
@@ -169,21 +197,13 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 	})
 }
 
-// paidMethod reports whether method is subject to payment. An empty
-// configured method list pays every method.
-func (g *Gate) paidMethod(method string) bool {
-	if len(g.methods) == 0 {
-		return true
-	}
-	_, ok := g.methods[method]
-	return ok
-}
-
 // paymentPayloadFromRequest parses the inbound payment, writing the 402
 // challenge and returning false when no usable payload is present.
 func (g *Gate) paymentPayloadFromRequest(w http.ResponseWriter, r *http.Request) (*types.PaymentPayload, bool) {
 	raw := ""
-	for _, name := range []string{HeaderXPayment, HeaderPaymentSignature} {
+	// PAYMENT-SIGNATURE is the canonical v2 request header; X-PAYMENT is the
+	// legacy compatibility form and must not override it.
+	for _, name := range []string{HeaderPaymentSignature, HeaderXPayment} {
 		if value := strings.TrimSpace(r.Header.Get(name)); value != "" {
 			raw = value
 			break
@@ -251,7 +271,7 @@ func (g *Gate) write402(w http.ResponseWriter, reason string) {
 	body := struct {
 		X402Version int                         `json:"x402Version"`
 		Error       string                      `json:"error,omitempty"`
-		Resource    *types.ResourceInfo         `json:"resource,omitempty"`
+		Resource    types.ResourceInfo          `json:"resource"`
 		Accepts     []types.PaymentRequirements `json:"accepts"`
 	}{
 		X402Version: int(types.X402VersionV2),

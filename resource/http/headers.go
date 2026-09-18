@@ -2,12 +2,13 @@ package x402http
 
 import "net/http"
 
-// x402 wire headers. The X-PAYMENT-REQUIRED and X-PAYMENT-RESPONSE names are
-// legacy twins published alongside PAYMENT-REQUIRED and PAYMENT-RESPONSE;
-// PAYMENT-SIGNATURE is a legacy inbound fallback for X-PAYMENT.
+// x402 wire headers. PAYMENT-SIGNATURE, PAYMENT-REQUIRED, and
+// PAYMENT-RESPONSE are the canonical v2 names; the X-PAYMENT-* trio is the
+// legacy compatibility form, published alongside the canonical response
+// headers and accepted as an inbound fallback only.
 const (
-	HeaderXPayment         = "X-PAYMENT"
 	HeaderPaymentSignature = "PAYMENT-SIGNATURE"
+	HeaderXPayment         = "X-PAYMENT"
 	HeaderPaymentRequired  = "PAYMENT-REQUIRED"
 	HeaderXPaymentRequired = "X-PAYMENT-REQUIRED"
 	HeaderPaymentResponse  = "PAYMENT-RESPONSE"

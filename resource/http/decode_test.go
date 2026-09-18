@@ -21,10 +21,10 @@ func TestWrapParsesInboundPaymentEncodings(t *testing.T) {
 		header string
 		value  string
 	}{
-		{"direct json", HeaderXPayment, string(raw)},
-		{"base64 std wrapped", HeaderXPayment, base64.StdEncoding.EncodeToString(raw)},
-		{"base64 url-safe wrapped", HeaderXPayment, base64.URLEncoding.EncodeToString(raw)},
-		{"legacy signature header fallback", HeaderPaymentSignature, base64.StdEncoding.EncodeToString(raw)},
+		{"direct json", HeaderPaymentSignature, string(raw)},
+		{"base64 std wrapped", HeaderPaymentSignature, base64.StdEncoding.EncodeToString(raw)},
+		{"base64 url-safe wrapped", HeaderPaymentSignature, base64.URLEncoding.EncodeToString(raw)},
+		{"legacy x-payment fallback", HeaderXPayment, base64.StdEncoding.EncodeToString(raw)},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -58,7 +58,7 @@ func TestWrapRejectsUndecodableAndLegacyVersions(t *testing.T) {
 			handler := gate.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { downstream = true }))
 
 			req := httptest.NewRequest(http.MethodGet, "/resource", nil)
-			req.Header.Set(HeaderXPayment, tc.value)
+			req.Header.Set(HeaderPaymentSignature, tc.value)
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)
 
@@ -71,18 +71,18 @@ func TestWrapRejectsUndecodableAndLegacyVersions(t *testing.T) {
 	}
 }
 
-func TestWrapPrefersXPaymentOverLegacyHeader(t *testing.T) {
+func TestWrapPrefersCanonicalSignatureOverLegacyHeader(t *testing.T) {
 	gate, stub := newTestGate(t, nil)
 	handler := gate.Wrap(okHandler)
 
 	raw, err := json.Marshal(v2Payload())
 	require.NoError(t, err)
 	req := httptest.NewRequest(http.MethodGet, "/resource", nil)
-	req.Header.Set(HeaderXPayment, string(raw))
-	req.Header.Set(HeaderPaymentSignature, "!!!not-a-payment!!!")
+	req.Header.Set(HeaderPaymentSignature, string(raw))
+	req.Header.Set(HeaderXPayment, "!!!not-a-payment!!!")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
 	require.Equal(t, http.StatusOK, rec.Code)
-	require.Equal(t, 1, stub.settleCalls, "X-PAYMENT must win over the legacy fallback")
+	require.Equal(t, 1, stub.settleCalls, "canonical PAYMENT-SIGNATURE must win over the legacy fallback")
 }

@@ -72,13 +72,18 @@ rejected:
 
 `resource/http` (package `x402http`) is a chain-blind, application-blind
 payment gate for `net/http` services. The gate owns the x402 wire surface:
-it parses the inbound `X-PAYMENT` header (with legacy `PAYMENT-SIGNATURE`
-fallback), answers unpaid and undecodable requests with a `402` challenge
-carrying the accepted requirements, settles paid requests through a
-`Facilitator` **before** the resource handler runs, publishes the base64
-settlement receipt in `PAYMENT-RESPONSE` / `X-PAYMENT-RESPONSE` headers, and
-strips every payment header from the forwarded request. `Methods` lists the
-paid HTTP methods; leave it empty to gate every method.
+it parses the inbound `PAYMENT-SIGNATURE` header (canonical v2; legacy
+`X-PAYMENT` accepted as a fallback), answers unpaid and undecodable requests
+with a `402` challenge carrying the resource metadata and accepted
+requirements, settles paid requests through a `Facilitator` **before** the
+resource handler runs, publishes the base64 settlement receipt in
+`PAYMENT-RESPONSE` / `X-PAYMENT-RESPONSE` headers, and strips every payment
+header from the forwarded request. Which routes or HTTP methods are paid is
+application policy: wrap exactly the handlers that should be paid.
+
+Phase 1 supports the settle-before-resource flow only
+(`x402http.PaymentFlowSettleBeforeResource`, the default); `Config.PaymentFlow`
+rejects anything else at construction time so later flows stay additive.
 
 ```go
 import (
@@ -104,6 +109,9 @@ gate, err := x402http.New(x402http.Config{
 		PayTo:   "0xYourReceivingAddress",
 	},
 	Facilitator: fac,
+	Resource: &types.ResourceInfo{
+		URL: "https://your.example/paid-resource",
+	},
 })
 if err != nil {
 	return err

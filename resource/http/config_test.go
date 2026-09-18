@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/gosuda/x402-facilitator/types"
 )
 
 func TestNewValidation(t *testing.T) {
@@ -24,9 +26,12 @@ func TestNewValidation(t *testing.T) {
 		{"nil facilitator", func(c *Config) { c.Facilitator = nil }},
 		{"blank scheme", func(c *Config) { c.Requirements.Scheme = "  " }},
 		{"blank network", func(c *Config) { c.Requirements.Network = "" }},
+		{"blank asset", func(c *Config) { c.Requirements.Asset = " " }},
 		{"blank amount", func(c *Config) { c.Requirements.Amount = " " }},
 		{"blank payTo", func(c *Config) { c.Requirements.PayTo = "\t" }},
-		{"blank methods entry", func(c *Config) { c.Methods = []string{"POST", "  "} }},
+		{"nil resource", func(c *Config) { c.Resource = nil }},
+		{"blank resource url", func(c *Config) { c.Resource = &types.ResourceInfo{URL: "  "} }},
+		{"unsupported payment flow", func(c *Config) { c.PaymentFlow = "verify-resource-settle" }},
 		{"negative request timeout", func(c *Config) { c.RequestTimeout = -time.Second }},
 	}
 	for _, tc := range cases {
@@ -40,10 +45,23 @@ func TestNewValidation(t *testing.T) {
 	}
 }
 
+func TestNewAcceptsExplicitSupportedFlow(t *testing.T) {
+	cfg := Config{
+		Requirements: testRequirements,
+		Facilitator:  &stubFacilitator{},
+		Resource:     testResource,
+		PaymentFlow:  PaymentFlowSettleBeforeResource,
+	}
+	gate, err := New(cfg)
+	require.NoError(t, err)
+	require.NotNil(t, gate)
+}
+
 func TestNewDefaultsAndNoCfgMutation(t *testing.T) {
 	cfg := Config{
 		Requirements: testRequirements,
 		Facilitator:  &stubFacilitator{},
+		Resource:     testResource,
 	}
 	cfg.Requirements.MaxTimeoutSeconds = 0
 
