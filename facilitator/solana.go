@@ -2,12 +2,14 @@ package facilitator
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	solclient "github.com/blocto/solana-go-sdk/client"
 	solcommon "github.com/blocto/solana-go-sdk/common"
@@ -29,16 +31,34 @@ type txSubmitter interface {
 	SendTransaction(ctx context.Context, tx soltypes.Transaction) (string, error)
 }
 
+// txConfirmer fetches the settlement status of a submitted transaction. It
+// exists so tests can stub the confirmation boundary.
+type txConfirmer interface {
+	GetTransaction(ctx context.Context, txhash string) (*solclient.Transaction, error)
+}
+
+const (
+	// solanaSettlementTimeout bounds how long Settle waits for the submitted
+	// transaction to reach a confirmed, successful state.
+	solanaSettlementTimeout = 30 * time.Second
+	// solanaSettlementPollInterval spaces out confirmation status polls.
+	solanaSettlementPollInterval = 2 * time.Second
+)
+
 // SolanaFacilitator settles x402 "exact" payments on Solana. The payer builds
 // and signs an SPL Token TransferChecked transaction that names the
 // facilitator's fee payer as the transaction fee payer; the facilitator
 // verifies the transfer against the payment requirements, co-signs with its
-// fee payer key, and submits the transaction to the RPC endpoint.
+// fee payer key, submits the transaction to the RPC endpoint, and reports
+// success only once the transaction is confirmed on chain.
 type SolanaFacilitator struct {
-	scheme   types.Scheme
-	network  string
-	feePayer soltypes.Account
-	client   txSubmitter
+	scheme         types.Scheme
+	network        string
+	feePayer       soltypes.Account
+	client         txSubmitter
+	confirmer      txConfirmer
+	confirmTimeout time.Duration
+	confirmTick    time.Duration
 }
 
 // NewSolanaFacilitator builds a Solana facilitator for a CAIP-2 Solana
@@ -61,11 +81,15 @@ func NewSolanaFacilitator(network string, rpcUrl string, privateKeyHex string) (
 		return nil, fmt.Errorf("invalid private key format: %w", err)
 	}
 
+	rpcClient := solclient.NewClient(rpcUrl)
 	return &SolanaFacilitator{
-		scheme:   types.Exact,
-		network:  network,
-		feePayer: feePayer,
-		client:   solclient.NewClient(rpcUrl),
+		scheme:         types.Exact,
+		network:        network,
+		feePayer:       feePayer,
+		client:         rpcClient,
+		confirmer:      rpcClient,
+		confirmTimeout: solanaSettlementTimeout,
+		confirmTick:    solanaSettlementPollInterval,
 	}, nil
 }
 
@@ -129,12 +153,48 @@ func (s *SolanaFacilitator) Settle(ctx context.Context, payload *types.PaymentPa
 		return fail(types.ErrTransactionFailed.Error(), err.Error(), payer)
 	}
 
+	// SendTransaction success only means the node accepted the transaction
+	// for processing; report success once it is actually confirmed.
+	if err := s.awaitSettlement(ctx, signature); err != nil {
+		resp, _ := fail(types.ErrTransactionFailed.Error(), err.Error(), payer)
+		resp.Transaction = signature
+		return resp, nil
+	}
+
 	return &types.PaymentSettleResponse{
 		Success:     true,
 		Payer:       payer,
 		Transaction: signature,
 		Network:     network,
 	}, nil
+}
+
+// awaitSettlement polls the confirmation endpoint until the submitted
+// transaction is visible and successful. On-chain failure and confirmation
+// timeouts both surface as errors, which Settle maps to a structured
+// settlement failure.
+func (s *SolanaFacilitator) awaitSettlement(ctx context.Context, signature string) error {
+	deadline := time.Now().Add(s.confirmTimeout)
+	for {
+		result, err := s.confirmer.GetTransaction(ctx, signature)
+		if err != nil {
+			return fmt.Errorf("failed to fetch transaction status: %w", err)
+		}
+		if result != nil {
+			if result.Meta != nil && result.Meta.Err != nil {
+				return fmt.Errorf("transaction failed on chain: %v", result.Meta.Err)
+			}
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("transaction %s was not confirmed within %s", signature, s.confirmTimeout)
+		}
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("settlement aborted: %w", ctx.Err())
+		case <-time.After(s.confirmTick):
+		}
+	}
 }
 
 // Supported returns the (scheme, network) kinds this facilitator serves. The
@@ -188,6 +248,15 @@ func (s *SolanaFacilitator) verifyPayment(payload *types.PaymentPayload, req *ty
 			InvalidMessage: "only legacy Solana transactions are supported",
 		}
 	}
+	// Minimal supported shape: exactly one instruction, the payment itself.
+	// The facilitator co-signs the whole message, so extra instructions
+	// (ComputeBudget, Memo, arbitrary spending) are rejected outright.
+	if len(transaction.Message.Instructions) != 1 {
+		return nil, "", &types.PaymentVerifyResponse{
+			InvalidReason:  types.ErrInvalidTransaction.Error(),
+			InvalidMessage: fmt.Sprintf("transaction must contain exactly one instruction, got %d", len(transaction.Message.Instructions)),
+		}
+	}
 	// The first required signer is the transaction fee payer. Pinning it to
 	// the configured key keeps the facilitator's signature scoped to paying
 	// fees; the transfer itself stays authorized by the payer's signature.
@@ -203,7 +272,24 @@ func (s *SolanaFacilitator) verifyPayment(payload *types.PaymentPayload, req *ty
 		return nil, "", invalid
 	}
 
-	payer, invalid := solanaPayer(transaction, transfer)
+	// The facilitator only signs as the fee payer; its key must not appear
+	// as an instruction account, or co-signing would approve spending from it.
+	if solanaReferencesAccount(transaction.Message, transaction.Message.Instructions[0], s.feePayer.PublicKey) {
+		return nil, "", &types.PaymentVerifyResponse{
+			InvalidReason:  types.ErrInvalidTransaction.Error(),
+			InvalidMessage: "transaction uses the facilitator fee payer as an instruction account",
+		}
+	}
+
+	messageBytes, err := transaction.Message.Serialize()
+	if err != nil {
+		return nil, "", &types.PaymentVerifyResponse{
+			InvalidReason:  types.ErrInvalidTransaction.Error(),
+			InvalidMessage: "failed to serialize transaction message: " + err.Error(),
+		}
+	}
+
+	payer, invalid := solanaPayer(messageBytes, transaction, transfer)
 	if invalid != nil {
 		return nil, "", invalid
 	}
@@ -268,25 +354,17 @@ func solanaTransferChecked(message soltypes.Message, req *types.PaymentRequireme
 		return nil, invalid(types.ErrAmountMismatch.Error(), "requirements amount is not an unsigned integer: "+err.Error())
 	}
 
-	var transfer *solanaCompiledTransfer
-	for _, compiled := range message.Instructions {
-		programID, err := solanaAccount(message, compiled.ProgramIDIndex)
-		if err != nil || programID != solcommon.TokenProgramID {
-			continue
-		}
-		if len(compiled.Data) == 0 || compiled.Data[0] != solanaTransferCheckedInstruction {
-			continue
-		}
-		if transfer != nil {
-			return nil, invalid(types.ErrInvalidTransaction.Error(), "transaction carries multiple SPL Token TransferChecked instructions")
-		}
-		transfer, err = solanaDecodeTransferChecked(message, compiled)
-		if err != nil {
-			return nil, invalid(types.ErrInvalidTransaction.Error(), "malformed SPL TransferChecked instruction: "+err.Error())
-		}
+	compiled := message.Instructions[0]
+	programID, err := solanaAccount(message, compiled.ProgramIDIndex)
+	if err != nil || programID != solcommon.TokenProgramID {
+		return nil, invalid(types.ErrInvalidTransaction.Error(), "transaction instruction is not an SPL Token program instruction")
 	}
-	if transfer == nil {
-		return nil, invalid(types.ErrInvalidTransaction.Error(), "transaction carries no SPL Token TransferChecked instruction")
+	if len(compiled.Data) == 0 || compiled.Data[0] != solanaTransferCheckedInstruction {
+		return nil, invalid(types.ErrInvalidTransaction.Error(), "transaction instruction is not SPL Token TransferChecked")
+	}
+	transfer, err := solanaDecodeTransferChecked(message, compiled)
+	if err != nil {
+		return nil, invalid(types.ErrInvalidTransaction.Error(), "malformed SPL TransferChecked instruction: "+err.Error())
 	}
 
 	mint, err := solanaPublicKey(req.Asset)
@@ -363,36 +441,41 @@ func solanaDecodeTransferChecked(message soltypes.Message, compiled soltypes.Com
 	}, nil
 }
 
-// solanaPayer resolves the paying account from the TransferChecked authority
-// and proves the payment was authorized: the authority (or one of its
-// multisig signers) must be a required transaction signer carrying a
-// signature on the wire.
-func solanaPayer(transaction soltypes.Transaction, transfer *solanaCompiledTransfer) (string, *types.PaymentVerifyResponse) {
+// solanaPayer proves the payment was authorized by the transfer authority.
+// The first supported version is single-payer only: the authority must be
+// the second required signer (the first is the facilitator fee payer) and
+// carry a valid Ed25519 signature over the serialized message. SPL multisig
+// signers are rejected.
+func solanaPayer(messageBytes []byte, transaction soltypes.Transaction, transfer *solanaCompiledTransfer) (string, *types.PaymentVerifyResponse) {
 	invalid := func(reason, message string) *types.PaymentVerifyResponse {
 		return &types.PaymentVerifyResponse{InvalidReason: reason, InvalidMessage: message}
 	}
 
-	signaturePresent := func(pubkey solcommon.PublicKey) bool {
-		for i := 0; i < int(transaction.Message.Header.NumRequireSignatures) && i < len(transaction.Message.Accounts); i++ {
-			if transaction.Message.Accounts[i] != pubkey {
-				continue
-			}
-			if i < len(transaction.Signatures) && !solanaEmptySignature(transaction.Signatures[i]) {
-				return true
-			}
-		}
-		return false
+	if len(transfer.signers) > 0 {
+		return "", invalid(types.ErrInvalidTransaction.Error(), "SPL multisig payments are not supported")
+	}
+	if transaction.Message.Header.NumRequireSignatures != 2 {
+		return "", invalid(types.ErrInvalidTransaction.Error(), "transaction must have exactly the fee payer and the payer as required signers")
 	}
 
-	if signaturePresent(transfer.authority) {
-		return transfer.authority.String(), nil
-	}
-	for _, signer := range transfer.signers {
-		if signaturePresent(signer) {
-			return signer.String(), nil
+	payerIndex := -1
+	for i, account := range transaction.Message.Accounts {
+		if account == transfer.authority {
+			payerIndex = i
+			break
 		}
 	}
-	return "", invalid(types.ErrInvalidSignature.Error(), "payment authority did not sign the transaction")
+	if payerIndex != 1 {
+		return "", invalid(types.ErrInvalidSignature.Error(), "payment authority is not the payer required signer")
+	}
+	var signature []byte
+	if payerIndex < len(transaction.Signatures) {
+		signature = transaction.Signatures[payerIndex]
+	}
+	if !ed25519.Verify(ed25519.PublicKey(transfer.authority[:]), messageBytes, signature) {
+		return "", invalid(types.ErrInvalidSignature.Error(), "payment authority did not sign the transaction")
+	}
+	return transfer.authority.String(), nil
 }
 
 // solanaAccount resolves a compiled instruction account index against the
@@ -404,13 +487,18 @@ func solanaAccount(message soltypes.Message, index int) (solcommon.PublicKey, er
 	return message.Accounts[index], nil
 }
 
-func solanaEmptySignature(signature []byte) bool {
-	for _, b := range signature {
-		if b != 0 {
-			return false
+// solanaReferencesAccount reports whether a compiled instruction references
+// the given account, either as its program or in its account list.
+func solanaReferencesAccount(message soltypes.Message, compiled soltypes.CompiledInstruction, key solcommon.PublicKey) bool {
+	if program, err := solanaAccount(message, compiled.ProgramIDIndex); err == nil && program == key {
+		return true
+	}
+	for _, index := range compiled.Accounts {
+		if account, err := solanaAccount(message, index); err == nil && account == key {
+			return true
 		}
 	}
-	return true
+	return false
 }
 
 func solanaPublicKey(value string) (solcommon.PublicKey, error) {

@@ -10,7 +10,9 @@ import (
 	"errors"
 	"strconv"
 	"testing"
+	"time"
 
+	solclient "github.com/blocto/solana-go-sdk/client"
 	solcommon "github.com/blocto/solana-go-sdk/common"
 	soltypes "github.com/blocto/solana-go-sdk/types"
 	"github.com/mr-tron/base58"
@@ -19,17 +21,50 @@ import (
 	"github.com/gosuda/x402-facilitator/types"
 )
 
-// stubSubmitter records what the facilitator submits so tests can inspect
-// the co-signed transaction without an RPC endpoint.
-type stubSubmitter struct {
+// stubRPC stands in for the Solana RPC boundary: it records what the
+// facilitator submits and simulates confirmation outcomes.
+type stubRPC struct {
 	signature string
-	err       error
+	sendErr   error
+	getErr    error
+	pending   int  // not-found responses before confirming
+	failed    bool // confirm with an on-chain error
+	calls     int
 	got       *soltypes.Transaction
+	gotHash   string
 }
 
-func (s *stubSubmitter) SendTransaction(_ context.Context, tx soltypes.Transaction) (string, error) {
+func (s *stubRPC) SendTransaction(_ context.Context, tx soltypes.Transaction) (string, error) {
 	s.got = &tx
-	return s.signature, s.err
+	return s.signature, s.sendErr
+}
+
+func (s *stubRPC) GetTransaction(_ context.Context, txhash string) (*solclient.Transaction, error) {
+	s.calls++
+	s.gotHash = txhash
+	if s.getErr != nil {
+		return nil, s.getErr
+	}
+	if s.pending > 0 {
+		s.pending--
+		return nil, nil
+	}
+	if s.failed {
+		return &solclient.Transaction{
+			Slot: 1,
+			Meta: &solclient.TransactionMeta{Err: map[string]any{"InstructionError": []any{float64(0), "custom program error"}}},
+		}, nil
+	}
+	return &solclient.Transaction{Slot: 1, Meta: &solclient.TransactionMeta{}}, nil
+}
+
+func sigIsNonZero(signature []byte) bool {
+	for _, b := range signature {
+		if b != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func solanaTestAccount(t *testing.T) soltypes.Account {
@@ -252,7 +287,38 @@ func TestSolanaVerifyRejectsInvalidTransactions(t *testing.T) {
 			tx := solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6)
 			tx.Message.Instructions = nil
 			return base64.StdEncoding.EncodeToString(mustSerializeTransaction(t, tx))
-		}, "no SPL Token TransferChecked instruction", types.ErrInvalidTransaction.Error()},
+		}, "exactly one instruction", types.ErrInvalidTransaction.Error()},
+		{"extra instruction", func(t *testing.T) string {
+			tx := solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6)
+			tx.Message.Instructions = append(tx.Message.Instructions, soltypes.CompiledInstruction{
+				ProgramIDIndex: 5,
+				Accounts:       []int{2, 3},
+				Data:           []byte{0x3},
+			})
+			return base64.StdEncoding.EncodeToString(mustSerializeTransaction(t, tx))
+		}, "exactly one instruction, got 2", types.ErrInvalidTransaction.Error()},
+		{"fee payer as instruction source", func(t *testing.T) string {
+			tx := solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6)
+			tx.Message.Accounts[2] = f.feePayer.PublicKey
+			return base64.StdEncoding.EncodeToString(mustSerializeTransaction(t, tx))
+		}, "uses the facilitator fee payer as an instruction account", types.ErrInvalidTransaction.Error()},
+		{"too many required signers", func(t *testing.T) string {
+			tx := solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6)
+			tx.Message.Header.NumRequireSignatures = 3
+			tx.Signatures = append(tx.Signatures, make(soltypes.Signature, 64))
+			return base64.StdEncoding.EncodeToString(mustSerializeTransaction(t, tx))
+		}, "exactly the fee payer and the payer", types.ErrInvalidTransaction.Error()},
+		{"spl multisig", func(t *testing.T) string {
+			tx := solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6)
+			tx.Message.Accounts = append(tx.Message.Accounts, solanaTestPubkey())
+			tx.Message.Instructions[0].Accounts = append(tx.Message.Instructions[0].Accounts, len(tx.Message.Accounts)-1)
+			return base64.StdEncoding.EncodeToString(mustSerializeTransaction(t, tx))
+		}, "SPL multisig", types.ErrInvalidTransaction.Error()},
+		{"random non-zero payer signature", func(t *testing.T) string {
+			tx := solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6)
+			rand.Read(tx.Signatures[1])
+			return base64.StdEncoding.EncodeToString(mustSerializeTransaction(t, tx))
+		}, "did not sign", types.ErrInvalidSignature.Error()},
 		{"wrong mint", func(t *testing.T) string {
 			tx := solanaTestTx(t, f.feePayer, payer, solanaTestPubkey(), dest, 1_000, 6)
 			return base64.StdEncoding.EncodeToString(mustSerializeTransaction(t, tx))
@@ -307,8 +373,9 @@ func TestSolanaSettleCoSignsAndSubmits(t *testing.T) {
 	dest, _, err := solcommon.FindAssociatedTokenAddress(payTo, mint)
 	require.NoError(t, err)
 
-	submitter := &stubSubmitter{signature: "5txSignature"}
-	f.client = submitter
+	rpc := &stubRPC{signature: "5txSignature"}
+	f.client = rpc
+	f.confirmer = rpc
 
 	req := solanaTestRequirements(mint, payTo, 1_000)
 	payload := solanaTestPayload(t, solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6), req)
@@ -320,11 +387,82 @@ func TestSolanaSettleCoSignsAndSubmits(t *testing.T) {
 	require.Equal(t, payer.PublicKey.String(), res.Payer)
 	require.Equal(t, types.Network("solana:devnet"), res.Network)
 
-	// The facilitator must have co-signed in the fee payer slot.
-	require.NotNil(t, submitter.got)
-	require.Len(t, submitter.got.Signatures, 2)
-	require.False(t, solanaEmptySignature(submitter.got.Signatures[0]), "fee payer slot must be signed")
-	require.False(t, solanaEmptySignature(submitter.got.Signatures[1]), "payer signature must be preserved")
+	// The facilitator must have co-signed in the fee payer slot and polled
+	// the confirmation endpoint for the submitted signature.
+	require.NotNil(t, rpc.got)
+	require.Len(t, rpc.got.Signatures, 2)
+	require.True(t, sigIsNonZero(rpc.got.Signatures[0]), "fee payer slot must be signed")
+	require.True(t, sigIsNonZero(rpc.got.Signatures[1]), "payer signature must be preserved")
+	require.Equal(t, "5txSignature", rpc.gotHash)
+	require.Equal(t, 1, rpc.calls)
+}
+
+func TestSolanaSettleWaitsForConfirmation(t *testing.T) {
+	f := solanaTestFacilitator(t)
+	f.confirmTick = time.Millisecond
+	payer := solanaTestAccount(t)
+	mint := solanaTestPubkey()
+	payTo := solanaTestPubkey()
+	dest, _, err := solcommon.FindAssociatedTokenAddress(payTo, mint)
+	require.NoError(t, err)
+
+	rpc := &stubRPC{signature: "5txPending", pending: 2}
+	f.client = rpc
+	f.confirmer = rpc
+
+	req := solanaTestRequirements(mint, payTo, 1_000)
+	payload := solanaTestPayload(t, solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6), req)
+
+	res, err := f.Settle(t.Context(), payload, req)
+	require.NoError(t, err)
+	require.True(t, res.Success, "two not-found polls must be tolerated before confirmation")
+	require.Equal(t, 3, rpc.calls)
+}
+
+func TestSolanaSettleReportsOnChainFailure(t *testing.T) {
+	f := solanaTestFacilitator(t)
+	payer := solanaTestAccount(t)
+	mint := solanaTestPubkey()
+	payTo := solanaTestPubkey()
+	dest, _, err := solcommon.FindAssociatedTokenAddress(payTo, mint)
+	require.NoError(t, err)
+
+	rpc := &stubRPC{signature: "5txFailed", failed: true}
+	f.client = rpc
+	f.confirmer = rpc
+
+	req := solanaTestRequirements(mint, payTo, 1_000)
+	payload := solanaTestPayload(t, solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6), req)
+
+	res, err := f.Settle(t.Context(), payload, req)
+	require.NoError(t, err)
+	require.False(t, res.Success, "an accepted-but-failed transaction must not report success")
+	require.Equal(t, types.ErrTransactionFailed.Error(), res.ErrorReason)
+	require.Contains(t, res.ErrorMessage, "failed on chain")
+	require.Equal(t, "5txFailed", res.Transaction)
+}
+
+func TestSolanaSettleTimesOutWhenNeverConfirmed(t *testing.T) {
+	f := solanaTestFacilitator(t)
+	f.confirmTimeout = time.Millisecond
+	f.confirmTick = time.Millisecond
+	payer := solanaTestAccount(t)
+	mint := solanaTestPubkey()
+	payTo := solanaTestPubkey()
+	dest, _, err := solcommon.FindAssociatedTokenAddress(payTo, mint)
+	require.NoError(t, err)
+
+	rpc := &stubRPC{signature: "5txStuck", pending: 999}
+	f.client = rpc
+	f.confirmer = rpc
+
+	req := solanaTestRequirements(mint, payTo, 1_000)
+	payload := solanaTestPayload(t, solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6), req)
+
+	res, err := f.Settle(t.Context(), payload, req)
+	require.NoError(t, err)
+	require.False(t, res.Success)
+	require.Contains(t, res.ErrorMessage, "not confirmed within")
 }
 
 func TestSolanaSettleReportsBroadcastFailure(t *testing.T) {
@@ -335,7 +473,7 @@ func TestSolanaSettleReportsBroadcastFailure(t *testing.T) {
 	dest, _, err := solcommon.FindAssociatedTokenAddress(payTo, mint)
 	require.NoError(t, err)
 
-	f.client = &stubSubmitter{err: errors.New("rpc unavailable")}
+	f.client = &stubRPC{sendErr: errors.New("rpc unavailable")}
 
 	req := solanaTestRequirements(mint, payTo, 1_000)
 	payload := solanaTestPayload(t, solanaTestTx(t, f.feePayer, payer, mint, dest, 1_000, 6), req)

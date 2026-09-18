@@ -53,6 +53,21 @@ facilitator's fee payer as the transaction fee payer. The facilitator
 verifies the transfer against the payment requirements, co-signs as fee
 payer, and submits the transaction.
 
+The supported subset is intentionally minimal; transactions outside it are
+rejected:
+
+- legacy transaction version only (no versioned/v0 transactions)
+- exactly one instruction, which must be the SPL Token `TransferChecked`
+  payment (no ComputeBudget, Memo, or other extra instructions)
+- exactly two required signers: the facilitator fee payer and the payer,
+  whose Ed25519 signature over the serialized message is verified; no SPL
+  multisig or Token-2022 support
+- the fee payer key must not appear as an instruction account; the
+  facilitator only ever signs to pay fees
+- settlement reports success only after the RPC reports the transaction
+  confirmed and successful; on-chain failures and confirmation timeouts
+  are structured settlement failures
+
 ## How to run
 
 ### Build binary
