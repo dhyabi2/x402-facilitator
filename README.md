@@ -68,6 +68,16 @@ rejected:
   confirmed and successful; on-chain failures and confirmation timeouts
   are structured settlement failures
 
+### Sui
+
+`scheme/sui` resolves Sui gasless-stablecoin payments: `PreparePayment`
+returns the unsigned consolidation and payment transactions a payer signs
+with their own Sui runtime, and the stablecoin amount conversion helpers
+(`StablecoinAmountToAtomic` / `FormatStablecoinAtomicAmount`) convert
+between human amounts and atomic units using the decimals registered per
+network. `scheme/sui/http` (package `suihttp`) is the Sui x402 prepare
+HTTP handler and browser client for that flow.
+
 ## Resource server (HTTP integration)
 
 `resource/http` (package `x402http`) is a chain-blind, application-blind
