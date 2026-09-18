@@ -100,7 +100,6 @@ failure instead of paying blindly again.
 import (
 	"net/http"
 
-	x402facilitator "github.com/gosuda/x402-facilitator/facilitator"
 	x402http "github.com/gosuda/x402-facilitator/resource/http"
 	evmfacilitator "github.com/gosuda/x402-facilitator/scheme/evm/facilitator"
 	"github.com/gosuda/x402-facilitator/types"
