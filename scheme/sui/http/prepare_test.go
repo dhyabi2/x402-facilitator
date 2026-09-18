@@ -515,3 +515,66 @@ func TestNewPrepareHandlerDoesNotMutateConfigExtra(t *testing.T) {
 	// the caller's config map must come out exactly as it went in.
 	require.Equal(t, map[string]interface{}{"asset": "USDC"}, extra)
 }
+
+// Applications serving one shared prepare endpoint over multiple paid
+// contracts skip the HTTP facade: they decode the request, select the
+// contract, and call Preparer.WritePrepare directly.
+func TestPreparerWritePrepareServesSelectedContract(t *testing.T) {
+	endpoint := newSuiLedgerGRPCTestServer(t, suiScatteredCoinsServer())
+	preparer, err := NewPreparer(Config{
+		Requirements: types.PaymentRequirements{
+			Scheme:  string(types.Exact),
+			Network: testNetwork,
+			Asset:   "USDC",
+			Amount:  testAmount,
+			PayTo:   testPayTo,
+		},
+		ResourcePath: "/paid/resource",
+		Endpoints:    []string{endpoint},
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/x402/prepare", nil)
+	request.Header.Set("X-Forwarded-Proto", "https")
+	request.Header.Set("X-Forwarded-Host", "paid.example.com")
+	preparer.WritePrepare(recorder, request, testSender)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, "application/json", recorder.Header().Get("Content-Type"))
+	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+
+	body := decodePrepareResponse(t, recorder)
+	require.InDelta(t, float64(2), body["x402Version"], 0)
+	requirements, ok := body["paymentRequirements"].(map[string]interface{})
+	require.True(t, ok, "paymentRequirements should echo the configured requirements")
+	extras, ok := requirements["extra"].(map[string]interface{})
+	require.True(t, ok, "paymentRequirements should carry extra")
+	require.Equal(t, "upfront", extras["paymentFlow"])
+	resource, ok := body["resource"].(map[string]interface{})
+	require.True(t, ok, "resource should describe the paid resource")
+	require.Equal(t, "https://paid.example.com/paid/resource", resource["url"])
+	requireBase64Transaction(t, body, "prepareTransaction")
+	requireBase64Transaction(t, body, "paymentTransaction")
+}
+
+func TestPreparerWritePrepareRejectsMissingSender(t *testing.T) {
+	preparer, err := NewPreparer(Config{
+		Requirements: types.PaymentRequirements{
+			Scheme:  string(types.Exact),
+			Network: testNetwork,
+			Asset:   "USDC",
+			Amount:  testAmount,
+			PayTo:   testPayTo,
+		},
+		ResourcePath: "/paid/resource",
+	})
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/x402/prepare", nil)
+	preparer.WritePrepare(recorder, request, "   ")
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "sender is required")
+}

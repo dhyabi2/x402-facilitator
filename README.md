@@ -76,7 +76,10 @@ with their own Sui runtime, and the stablecoin amount conversion helpers
 (`StablecoinAmountToAtomic` / `FormatStablecoinAtomicAmount`) convert
 between human amounts and atomic units using the decimals registered per
 network. `scheme/sui/http` (package `suihttp`) is the Sui x402 prepare
-HTTP handler and browser client for that flow.
+HTTP handler and browser client for that flow: `NewPrepareHandler` serves
+one fixed contract, while applications routing a shared prepare endpoint
+over multiple paid contracts build a `Preparer` per contract
+(`NewPreparer`) and call `WritePrepare` after their own route selection.
 
 ## Resource server (HTTP integration)
 

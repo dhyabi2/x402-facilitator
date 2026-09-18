@@ -82,12 +82,15 @@ type PreparePaymentResponse struct {
 	PaymentTransaction  TransactionPayload        `json:"paymentTransaction"`
 }
 
-// NewPrepareHandler validates cfg and returns the POST-only prepare handler.
-// cfg is not mutated; the handler keeps a normalized copy of the
+// NewPreparer validates cfg and returns the reusable prepare operation.
+// cfg is not mutated; the preparer keeps a normalized copy of the
 // requirements with the maxTimeoutSeconds default and the gate's upfront
 // paymentFlow applied, so the echo satisfies the gate's accepted-requirements
-// match.
-func NewPrepareHandler(cfg Config) (http.Handler, error) {
+// match. Applications that serve one shared prepare endpoint over multiple
+// paid contracts decode the request, select the contract themselves, and
+// call Preparer.WritePrepare directly; NewPrepareHandler is the thin
+// single-contract HTTP facade over it.
+func NewPreparer(cfg Config) (*Preparer, error) {
 	requirements := cfg.Requirements
 	switch {
 	case strings.TrimSpace(requirements.Scheme) == "":
@@ -138,7 +141,7 @@ func NewPrepareHandler(cfg Config) (http.Handler, error) {
 	}
 	resourceMimeType := strings.TrimSpace(cfg.ResourceMimeType)
 	resourceMimeType = cmp.Or(resourceMimeType, "text/html")
-	return &prepareHandler{
+	return &Preparer{
 		requirements: requirements,
 		resourceInfo: types.ResourceInfo{
 			Description: strings.TrimSpace(cfg.ResourceDescription),
@@ -150,7 +153,11 @@ func NewPrepareHandler(cfg Config) (http.Handler, error) {
 	}, nil
 }
 
-type prepareHandler struct {
+// Preparer executes the reusable Sui prepare operation for one payment
+// contract: it validates the sender, delegates transaction construction to
+// sui.PreparePayment, and writes the payer-facing prepare response. It
+// never signs or submits anything.
+type Preparer struct {
 	requirements   types.PaymentRequirements
 	resourceInfo   types.ResourceInfo
 	resourcePath   string
@@ -158,23 +165,46 @@ type prepareHandler struct {
 	requestTimeout time.Duration
 }
 
-func (h *prepareHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		w.Header().Set("Allow", http.MethodPost)
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
+// NewPrepareHandler validates cfg and returns a POST-only handler that
+// decodes the sender-only prepare request body and serves one fixed
+// payment contract. Applications routing a shared prepare endpoint over
+// multiple contracts should build a Preparer per contract and call
+// WritePrepare after their own route selection.
+func NewPrepareHandler(cfg Config) (http.Handler, error) {
+	preparer, err := NewPreparer(cfg)
+	if err != nil {
+		return nil, err
 	}
-	var req PreparePaymentRequest
-	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPrepareBodyBytes)).Decode(&req); err != nil {
-		var tooLarge *http.MaxBytesError
-		if errors.As(err, &tooLarge) {
-			http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			w.Header().Set("Allow", http.MethodPost)
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		http.Error(w, "invalid JSON body", http.StatusBadRequest)
+		var req PreparePaymentRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxPrepareBodyBytes)).Decode(&req); err != nil {
+			var tooLarge *http.MaxBytesError
+			if errors.As(err, &tooLarge) {
+				http.Error(w, "request body too large", http.StatusRequestEntityTooLarge)
+				return
+			}
+			http.Error(w, "invalid JSON body", http.StatusBadRequest)
+			return
+		}
+		preparer.WritePrepare(w, r, req.Sender)
+	}), nil
+}
+
+// WritePrepare runs the prepare operation for sender and writes the
+// prepare response. The advertised resource URL follows the request's
+// proxy forwarding headers. sender is the raw request field; it is
+// normalized here.
+func (p *Preparer) WritePrepare(w http.ResponseWriter, r *http.Request, sender string) {
+	if p == nil {
+		http.Error(w, "prepare is not configured", http.StatusInternalServerError)
 		return
 	}
-	sender := sui.NormalizeAddress(req.Sender)
+	sender = sui.NormalizeAddress(sender)
 	if sender == "" {
 		http.Error(w, "sender is required", http.StatusBadRequest)
 		return
@@ -182,17 +212,17 @@ func (h *prepareHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	cancel := func() {}
-	if h.requestTimeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, h.requestTimeout)
+	if p.requestTimeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, p.requestTimeout)
 	}
 	defer cancel()
 	prepared, err := sui.PreparePayment(ctx, sui.GaslessStablecoinObjectBalancePayment{
 		Sender:    sender,
-		Recipient: h.requirements.PayTo,
-		Network:   h.requirements.Network,
-		Asset:     h.requirements.Asset,
-		Amount:    h.requirements.Amount,
-		Endpoints: h.endpoints,
+		Recipient: p.requirements.PayTo,
+		Network:   p.requirements.Network,
+		Asset:     p.requirements.Asset,
+		Amount:    p.requirements.Amount,
+		Endpoints: p.endpoints,
 	})
 	if err != nil {
 		http.Error(w, "prepare payment: "+err.Error(), http.StatusBadGateway)
@@ -201,11 +231,11 @@ func (h *prepareHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	response := PreparePaymentResponse{
 		X402Version:         int(types.X402VersionV2),
-		PaymentRequirements: h.requirements,
+		PaymentRequirements: p.requirements,
 		Resource: &types.ResourceInfo{
-			URL:         publicURLForPath(r, h.resourcePath),
-			Description: h.resourceInfo.Description,
-			MimeType:    h.resourceInfo.MimeType,
+			URL:         publicURLForPath(r, p.resourcePath),
+			Description: p.resourceInfo.Description,
+			MimeType:    p.resourceInfo.MimeType,
 		},
 		PaymentTransaction: TransactionPayload{Transaction: prepared.PaymentTransaction},
 	}
