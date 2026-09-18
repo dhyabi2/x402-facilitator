@@ -152,10 +152,14 @@ func TestWrapUnpaidRequestChallenges(t *testing.T) {
 	require.Len(t, body.Accepts, 1)
 	require.Equal(t, string(types.Exact), body.Accepts[0].Scheme)
 	require.Equal(t, "eip155:84532", body.Accepts[0].Network)
+	require.Equal(t, PaymentFlowUpfront, body.Accepts[0].Extra["paymentFlow"],
+		"challenge must advertise the upfront flow")
 
 	encoded := base64.StdEncoding.EncodeToString(rec.Body.Bytes())
 	require.Equal(t, encoded, rec.Header().Get(HeaderPaymentRequired))
 	require.Equal(t, encoded, rec.Header().Get(HeaderXPaymentRequired))
+	require.Equal(t, "no-store", rec.Header().Get("Cache-Control"),
+		"challenges must never be cached")
 }
 
 func TestWrapPaidRequestSettlesAndForwards(t *testing.T) {
@@ -169,6 +173,7 @@ func TestWrapPaidRequestSettlesAndForwards(t *testing.T) {
 		// Forge payment headers downstream; the trusted receipt must win.
 		w.Header().Set(HeaderPaymentResponse, "forged")
 		w.Header().Set(HeaderPaymentRequired, "forged")
+		w.Header().Set("Cache-Control", "max-age=60")
 		w.Write([]byte("ok")) // no WriteHeader: exercises the auto-200
 	}))
 
@@ -183,7 +188,9 @@ func TestWrapPaidRequestSettlesAndForwards(t *testing.T) {
 
 	require.Equal(t, int(types.X402VersionV2), stub.payload.X402Version)
 	require.Equal(t, map[string]interface{}{"authorization": "0xsig"}, stub.payload.Payload)
-	require.Equal(t, testRequirements, *stub.reqs, "settle receives the configured requirements")
+	expected := testRequirements
+	expected.Extra = map[string]interface{}{"paymentFlow": PaymentFlowUpfront}
+	require.Equal(t, expected, *stub.reqs, "settle receives the configured requirements with the advertised flow")
 
 	for _, name := range paymentHeaders {
 		require.Empty(t, forwarded.Get(name), "%s must be stripped before forwarding", name)
@@ -196,6 +203,8 @@ func TestWrapPaidRequestSettlesAndForwards(t *testing.T) {
 	require.Equal(t, encoded, rec.Header().Get(HeaderPaymentResponse))
 	require.Equal(t, encoded, rec.Header().Get(HeaderXPaymentResponse))
 	require.Empty(t, rec.Header().Get(HeaderPaymentRequired), "forged challenge header must be stripped")
+	require.Equal(t, "max-age=60, private", rec.Header().Get("Cache-Control"),
+		"paid responses must gain the private cache directive")
 
 	require.True(t, settlementOK)
 	require.Equal(t, "0xsettled", settlement.Transaction)
@@ -252,29 +261,36 @@ func TestWrapSettleDeadlineDoesNotPropagate(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, 1, slow.settleCalls)
+	require.Equal(t, "private", rec.Header().Get("Cache-Control"))
 	require.False(t, hasDeadline, "settle deadline must not bound resource execution")
 	require.Zero(t, deadline)
 	require.NoError(t, ctxErr)
 }
 
 func TestWrapRejectedSettlementChallenges(t *testing.T) {
-	cases := map[string]func(*stubFacilitator){
-		"facilitator error": func(f *stubFacilitator) {
+	cases := map[string]struct {
+		poison      func(*stubFacilitator)
+		wantReceipt bool
+	}{
+		"facilitator error": {poison: func(f *stubFacilitator) {
 			f.settleFn = func() (*types.PaymentSettleResponse, error) { return nil, errors.New("broadcast failed") }
-		},
-		"nil response": func(f *stubFacilitator) {
+		}},
+		"nil response": {poison: func(f *stubFacilitator) {
 			f.settleFn = func() (*types.PaymentSettleResponse, error) { return nil, nil }
-		},
-		"unsuccessful response": func(f *stubFacilitator) {
-			f.settleFn = func() (*types.PaymentSettleResponse, error) {
-				return &types.PaymentSettleResponse{Success: false, ErrorReason: "transaction_failed"}, nil
-			}
+		}},
+		"unsuccessful response": {
+			poison: func(f *stubFacilitator) {
+				f.settleFn = func() (*types.PaymentSettleResponse, error) {
+					return &types.PaymentSettleResponse{Success: false, ErrorReason: "transaction_failed", Transaction: "0xpending"}, nil
+				}
+			},
+			wantReceipt: true,
 		},
 	}
-	for name, poison := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			gate, stub := newTestGate(t, nil)
-			poison(stub)
+			tc.poison(stub)
 			downstream := false
 			handler := gate.Wrap(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { downstream = true }))
 
@@ -285,7 +301,24 @@ func TestWrapRejectedSettlementChallenges(t *testing.T) {
 			require.False(t, downstream, "rejected settlement must not reach the resource")
 			body := decodeChallenge(t, rec)
 			require.Equal(t, "payment settlement failed", body.Error)
-			require.Empty(t, rec.Header().Get(HeaderPaymentResponse))
+			require.Equal(t, "no-store", rec.Header().Get("Cache-Control"))
+			if tc.wantReceipt {
+				// A structured settlement failure keeps its receipt so the
+				// client can distinguish a pending broadcast from a payable
+				// failure.
+				require.NotEmpty(t, rec.Header().Get(HeaderPaymentResponse))
+				require.NotEmpty(t, rec.Header().Get(HeaderXPaymentResponse))
+				raw, err := base64.StdEncoding.DecodeString(rec.Header().Get(HeaderPaymentResponse))
+				require.NoError(t, err)
+				var receipt types.PaymentSettleResponse
+				require.NoError(t, json.Unmarshal(raw, &receipt))
+				require.False(t, receipt.Success)
+				require.Equal(t, "transaction_failed", receipt.ErrorReason)
+				require.Equal(t, "0xpending", receipt.Transaction)
+			} else {
+				require.Empty(t, rec.Header().Get(HeaderPaymentResponse),
+					"no structured response means no receipt")
+			}
 		})
 	}
 }
@@ -306,5 +339,7 @@ func TestWrapForwardsRequirementsAndAcceptedRoundTrip(t *testing.T) {
 	require.Equal(t, payload.Accepted, stub.payload.Accepted, "accepted requirements survive the header round-trip")
 	require.Equal(t, testRequirements.Amount, stub.reqs.Amount)
 	require.Equal(t, testRequirements.Network, stub.reqs.Network)
-	require.Equal(t, testRequirements, *stub.reqs, "settle receives the configured contract, not the client's")
+	expected := testRequirements
+	expected.Extra = map[string]interface{}{"paymentFlow": PaymentFlowUpfront}
+	require.Equal(t, expected, *stub.reqs, "settle receives the configured contract with the advertised flow, not the client's")
 }

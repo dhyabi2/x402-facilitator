@@ -11,9 +11,12 @@
 //   - inbound payment header: canonical v2 PAYMENT-SIGNATURE, with the
 //     legacy X-PAYMENT accepted as a fallback when the canonical header is
 //     absent;
-//   - payment flow: settle-before-resource only (PaymentFlowSettleBeforeResource).
-//     Flows such as verify/resource/settle are out of scope and rejected at
-//     configuration time rather than silently mis-orchestrated;
+//   - payment flow: the canonical upfront flow only (PaymentFlowUpfront).
+//     The gate normalizes the advertised requirements to
+//     extra.paymentFlow = "upfront" — omitted, clients would misread them
+//     as the default "authorization" flow — and rejects a conflicting
+//     configured flow. authorization/escrow orchestration is out of scope
+//     for this phase;
 //   - the 402 challenge always carries resource metadata: Config.Resource
 //     (with URL) is required.
 //
@@ -36,7 +39,9 @@ import (
 
 const (
 	// defaultRequestTimeout bounds a settle call when Config.RequestTimeout
-	// is unset, so a stuck facilitator cannot hang a paid request forever.
+	// is unset. The bound holds for facilitators that honor context
+	// cancellation (expected of all implementations); the gate cannot
+	// preempt one that ignores its context.
 	defaultRequestTimeout = 30 * time.Second
 
 	// defaultMaxTimeoutSeconds is published as maxTimeoutSeconds when the
@@ -51,13 +56,15 @@ const (
 	reasonSettleFailed    = "payment settlement failed"
 )
 
-// PaymentFlowSettleBeforeResource is the only payment flow this phase
-// supports: the payment is fully settled before the resource handler runs.
-// Flows that interleave verification and resource execution (e.g.
-// verify/resource/settle) are intentionally not implemented here and are
-// rejected at configuration time, so adopting them later is an additive
-// change instead of a redesign of Wrap.
-const PaymentFlowSettleBeforeResource = "settle-before-resource"
+// PaymentFlowUpfront is the canonical x402 payment flow this gate
+// implements: the payment is fully settled (upfront) before the resource
+// handler runs. The gate normalizes its accepted requirements to
+// extra.paymentFlow = "upfront" so clients build upfront payments instead of
+// misreading the requirements as the default "authorization" flow. The
+// remaining canonical flows ("authorization", "escrow") are out of scope for
+// this phase; a configured extra.paymentFlow that conflicts with "upfront"
+// is rejected at construction time, so supporting them later is additive.
+const PaymentFlowUpfront = "upfront"
 
 // Facilitator is the settlement backend the gate drives. Both the local
 // facilitators and the remote api/client.Client satisfy it.
@@ -77,17 +84,17 @@ type Config struct {
 	Facilitator Facilitator
 
 	// Resource describes the paid resource and is embedded into every 402
-	// challenge; a URL is required, because the v2 payment-required shape
-	// advertises it. Use the public URL a paying client can reach.
+	// challenge; a URL is required. This is deliberately stricter than the
+	// wire DTO (types.ResourceInfo is optional there): the gate always
+	// produces a complete v2 payment-required challenge, so it refuses
+	// configurations that cannot. Use the public URL a paying client can
+	// reach.
 	Resource *types.ResourceInfo
 
-	// PaymentFlow selects the orchestration the gate performs. Empty
-	// defaults to PaymentFlowSettleBeforeResource, the only supported flow;
-	// any other value is a configuration error.
-	PaymentFlow string
-
-	// RequestTimeout bounds each Settle call. Zero defaults to 30s; a
-	// negative value is a configuration error.
+	// RequestTimeout bounds each Settle call for facilitators that honor
+	// context cancellation, as all implementations are expected to; the
+	// gate cannot preempt one that ignores its context. Zero defaults to
+	// 30s; a negative value is a configuration error.
 	RequestTimeout time.Duration
 }
 
@@ -96,12 +103,12 @@ type Gate struct {
 	facilitator    Facilitator
 	requirements   types.PaymentRequirements
 	resource       types.ResourceInfo
-	paymentFlow    string
 	requestTimeout time.Duration
 }
 
 // New validates cfg and returns a Gate. cfg is not mutated; the gate keeps a
-// normalized copy of the requirements.
+// normalized copy of the requirements with extra.paymentFlow pinned to the
+// upfront flow.
 func New(cfg Config) (*Gate, error) {
 	if cfg.Facilitator == nil {
 		return nil, errors.New("x402http: facilitator is required")
@@ -122,15 +129,20 @@ func New(cfg Config) (*Gate, error) {
 	if requirements.MaxTimeoutSeconds <= 0 {
 		requirements.MaxTimeoutSeconds = defaultMaxTimeoutSeconds
 	}
+	// Copy Extra so normalization never touches the caller's map, then pin
+	// the canonical flow: omitted paymentFlow would be read by clients as
+	// the default "authorization" flow, which this gate does not perform.
+	extra := make(map[string]interface{}, len(requirements.Extra)+1)
+	for key, value := range requirements.Extra {
+		extra[key] = value
+	}
+	if existing, ok := extra["paymentFlow"]; ok && existing != PaymentFlowUpfront {
+		return nil, fmt.Errorf("x402http: requirements.extra.paymentFlow %v conflicts with the gate's %q flow", existing, PaymentFlowUpfront)
+	}
+	extra["paymentFlow"] = PaymentFlowUpfront
+	requirements.Extra = extra
 	if cfg.Resource == nil || strings.TrimSpace(cfg.Resource.URL) == "" {
 		return nil, errors.New("x402http: resource with a URL is required for the 402 challenge")
-	}
-	paymentFlow := cfg.PaymentFlow
-	if paymentFlow == "" {
-		paymentFlow = PaymentFlowSettleBeforeResource
-	}
-	if paymentFlow != PaymentFlowSettleBeforeResource {
-		return nil, fmt.Errorf("x402http: unsupported payment flow %q: only %q is supported", paymentFlow, PaymentFlowSettleBeforeResource)
 	}
 	if cfg.RequestTimeout < 0 {
 		return nil, errors.New("x402http: request timeout must not be negative")
@@ -143,7 +155,6 @@ func New(cfg Config) (*Gate, error) {
 		facilitator:    cfg.Facilitator,
 		requirements:   requirements,
 		resource:       *cfg.Resource,
-		paymentFlow:    paymentFlow,
 		requestTimeout: requestTimeout,
 	}, nil
 }
@@ -161,7 +172,7 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 			return
 		}
 		if payload.X402Version != int(types.X402VersionV2) {
-			g.write402(w, reasonInvalidPayment)
+			g.write402(w, reasonInvalidPayment, "")
 			return
 		}
 
@@ -169,13 +180,20 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 		requirements := g.requirements
 		settled, err := g.facilitator.Settle(settleCtx, payload, &requirements)
 		cancel()
-		if err != nil || settled == nil || !settled.Success {
-			g.write402(w, reasonSettleFailed)
+		if err != nil || settled == nil {
+			g.write402(w, reasonSettleFailed, "")
 			return
 		}
 		receipt, err := receiptOf(settled)
 		if err != nil {
-			g.write402(w, reasonSettleFailed)
+			g.write402(w, reasonSettleFailed, "")
+			return
+		}
+		if !settled.Success {
+			// Structured settlement failure: still a challenge, but the
+			// client receives the receipt so it can tell a pending
+			// broadcast from a payable failure instead of paying blindly.
+			g.write402(w, reasonSettleFailed, receipt)
 			return
 		}
 		setPaymentResponseHeaders(w.Header(), receipt)
@@ -210,12 +228,12 @@ func (g *Gate) paymentPayloadFromRequest(w http.ResponseWriter, r *http.Request)
 		}
 	}
 	if raw == "" {
-		g.write402(w, reasonPaymentRequired)
+		g.write402(w, reasonPaymentRequired, "")
 		return nil, false
 	}
 	payload, ok := decodePaymentPayload(raw)
 	if !ok {
-		g.write402(w, reasonInvalidPayment)
+		g.write402(w, reasonInvalidPayment, "")
 		return nil, false
 	}
 	return payload, true
@@ -264,10 +282,12 @@ func setPaymentResponseHeaders(header http.Header, receipt string) {
 }
 
 // write402 answers with the x402 challenge: the JSON body carries the
-// protocol version, the failure reason, the optional resource, and the
+// protocol version, the failure reason, the resource metadata, and the
 // accepted requirements; both challenge headers carry the same body base64
-// encoded.
-func (g *Gate) write402(w http.ResponseWriter, reason string) {
+// encoded. receipt, when non-empty, publishes a structured settlement
+// result (e.g. a pending or failed settlement) alongside the challenge.
+// Payment-signaling responses are never cacheable.
+func (g *Gate) write402(w http.ResponseWriter, reason string, receipt string) {
 	body := struct {
 		X402Version int                         `json:"x402Version"`
 		Error       string                      `json:"error,omitempty"`
@@ -286,8 +306,12 @@ func (g *Gate) write402(w http.ResponseWriter, reason string) {
 	}
 	encoded := base64.StdEncoding.EncodeToString(raw)
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set(HeaderPaymentRequired, encoded)
 	w.Header().Set(HeaderXPaymentRequired, encoded)
+	if receipt != "" {
+		setPaymentResponseHeaders(w.Header(), receipt)
+	}
 	w.WriteHeader(http.StatusPaymentRequired)
 	_, _ = w.Write(raw)
 }
@@ -308,8 +332,27 @@ func (w *gateResponseWriter) WriteHeader(status int) {
 	StripPaymentHeaders(w.Header())
 	if w.receipt != "" {
 		setPaymentResponseHeaders(w.Header(), w.receipt)
+		mergeCachePrivate(w.Header())
 	}
 	w.ResponseWriter.WriteHeader(status)
+}
+
+// mergeCachePrivate adds the private cache directive to a response that
+// carries a settlement receipt, so a shared proxy or CDN never serves a paid
+// response without the payment gate running. Existing directives are kept.
+func mergeCachePrivate(header http.Header) {
+	const private = "private"
+	existing := strings.TrimSpace(header.Get("Cache-Control"))
+	if existing == "" {
+		header.Set("Cache-Control", private)
+		return
+	}
+	for _, directive := range strings.Split(existing, ",") {
+		if strings.EqualFold(strings.TrimSpace(directive), private) {
+			return
+		}
+	}
+	header.Set("Cache-Control", existing+", "+private)
 }
 
 func (w *gateResponseWriter) Write(body []byte) (int, error) {

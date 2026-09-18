@@ -81,9 +81,20 @@ resource handler runs, publishes the base64 settlement receipt in
 header from the forwarded request. Which routes or HTTP methods are paid is
 application policy: wrap exactly the handlers that should be paid.
 
-Phase 1 supports the settle-before-resource flow only
-(`x402http.PaymentFlowSettleBeforeResource`, the default); `Config.PaymentFlow`
-rejects anything else at construction time so later flows stay additive.
+Phase 1 implements the canonical **upfront** flow only: the gate settles
+before the resource handler runs and normalizes the accepted requirements to
+`extra.paymentFlow = "upfront"` — without it, clients would misread the
+requirements as the default `authorization` flow — and rejects a configured
+`extra.paymentFlow` that conflicts with `upfront`. The remaining canonical
+flows (`authorization`, `escrow`) are future phases.
+
+The gate also owns payment cache policy: 402 challenges and settlement
+failures are `Cache-Control: no-store`, and any response carrying a
+settlement receipt gains the `private` directive so a shared proxy or CDN
+cannot serve a paid response without the gate running. A structured
+settlement failure (`Success: false`) still carries its `PAYMENT-RESPONSE`
+receipt on the 402, so a client can tell a pending broadcast from a payable
+failure instead of paying blindly again.
 
 ```go
 import (
