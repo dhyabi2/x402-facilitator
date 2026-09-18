@@ -106,8 +106,8 @@ import (
 )
 
 // Chain facilitators are composed explicitly. The EVM one lives in the
-// scheme/evm module (separate go.mod); the Solana/Sui/Tron/Casper ones are
-// in the root module's facilitator package.
+// scheme/evm module (separate go.mod); the Solana/Sui/Tron/Casper ones live
+// under scheme/<chain>/facilitator in the root module.
 fac, err := evmfacilitator.NewEVMFacilitator(
 	"eip155:84532", "https://sepolia.base.org", privateKeyHex)
 if err != nil {
@@ -141,9 +141,9 @@ mux.Handle("/paid-resource", gate.Wrap(http.HandlerFunc(func(w http.ResponseWrit
 
 Anything satisfying the gate's two-method `Facilitator` interface works as
 the settlement backend: the chain facilitators in this repository (EVM from
-`scheme/evm`; Solana, Sui, Tron, Casper from the root `facilitator`
-package) and the remote `api/client.Client` for talking to a separate
-facilitator deployment.
+`scheme/evm/facilitator`; Solana, Sui, Tron, Casper from
+`scheme/<chain>/facilitator`) and the remote `api/client.Client` for talking
+to a separate facilitator deployment.
 
 ## Module layout
 
@@ -155,19 +155,21 @@ follow the same pattern):
 
 | Module (directory) | Contents | Pulls |
 |---|---|---|
-| `github.com/gosuda/x402-facilitator` (root) | `types`, `resource/http`, `api`, `facilitator` (interface + Solana/Sui/Tron/Casper), `scheme/{sui,casper,solana}`, `utils` | no go-ethereum, no x402 SDK |
+| `github.com/gosuda/x402-facilitator` (root) | `types`, `resource/http`, `api`, `scheme` (facilitator contract + Solana/Sui/Tron/Casper facilitators), `utils` | no go-ethereum, no x402 SDK |
 | `github.com/gosuda/x402-facilitator/scheme/evm` (`scheme/evm/`) | EVM scheme, EIP-3009/Permit2, EVM facilitator, SDK wire-compat guard | go-ethereum, x402-foundation |
-| `github.com/gosuda/x402-facilitator/cmd` (`cmd/`) | `x402-facilitator` + `x402-client` binaries and the scheme dispatch | root + scheme/evm |
+| `github.com/gosuda/x402-facilitator/cmd` (`cmd/`) | `x402-facilitator` + `x402-client` binaries and the chain registry | root + scheme/evm |
 
 Dependencies are one-directional: `scheme/evm` requires the root module,
 and `cmd` requires both — the root module never requires the EVM module,
 so a Sui-only or remote-facilitator consumer imports the root module and
-inherits no go-ethereum graph. The root `facilitator.NewFacilitator`
-factory routes the chains the root module ships (Solana, Sui, Tron,
-Casper) and points `eip155:*` at the EVM module; the shipped
-`x402-facilitator` binary re-adds that one case in
-`cmd/facilitator/registry.go`, because including go-ethereum is a
-distribution choice, not a library property.
+inherits no go-ethereum graph. `scheme.Facilitator` is the common
+contract every scheme implements; each concrete facilitator lives beside
+its chain (`scheme/<chain>/facilitator`), and the shipped
+`x402-facilitator` binary composes them explicitly in
+`cmd/facilitator/registry.go` — which chains a distribution includes is
+a distribution choice, not a library property. Libraries that need only
+some chains construct the `scheme/<chain>/facilitator` types they want
+directly.
 
 ## How to run
 

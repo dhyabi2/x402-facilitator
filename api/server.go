@@ -11,7 +11,7 @@ import (
 	echoSwagger "github.com/swaggo/echo-swagger"
 
 	"github.com/gosuda/x402-facilitator/api/middleware"
-	"github.com/gosuda/x402-facilitator/facilitator"
+	"github.com/gosuda/x402-facilitator/scheme"
 	"github.com/gosuda/x402-facilitator/types"
 )
 
@@ -20,12 +20,12 @@ import (
 // @description  API server for x402 payment facilitator
 type server struct {
 	*echo.Echo
-	facilitator facilitator.Facilitator
+	facilitator scheme.Facilitator
 }
 
 var _ http.Handler = (*server)(nil)
 
-func NewServer(facilitator facilitator.Facilitator) *server {
+func NewServer(facilitator scheme.Facilitator) *server {
 	s := &server{
 		Echo:        echo.New(),
 		facilitator: facilitator,

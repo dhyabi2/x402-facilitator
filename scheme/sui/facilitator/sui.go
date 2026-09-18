@@ -7,11 +7,12 @@ import (
 	"math/big"
 	"strings"
 
+	"github.com/gosuda/x402-facilitator/scheme"
 	suischeme "github.com/gosuda/x402-facilitator/scheme/sui"
 	"github.com/gosuda/x402-facilitator/types"
 )
 
-var _ Facilitator = (*SuiFacilitator)(nil)
+var _ scheme.Facilitator = (*SuiFacilitator)(nil)
 
 type SuiFacilitator struct {
 	scheme              types.Scheme
