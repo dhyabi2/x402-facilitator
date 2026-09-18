@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/ethereum/go-ethereum v1.16.8
-	github.com/gosuda/x402-facilitator v0.0.4
+	github.com/gosuda/x402-facilitator v0.0.5
 	github.com/stretchr/testify v1.11.1
 	github.com/x402-foundation/x402/go v0.0.0-20260411143128-ea0768cd7e69
 )
