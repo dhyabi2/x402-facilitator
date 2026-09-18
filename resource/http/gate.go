@@ -31,6 +31,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"time"
 
@@ -51,9 +52,10 @@ const (
 
 // The only challenge reasons written to the 402 body.
 const (
-	reasonPaymentRequired = "payment required"
-	reasonInvalidPayment  = "invalid payment payload"
-	reasonSettleFailed    = "payment settlement failed"
+	reasonPaymentRequired      = "payment required"
+	reasonInvalidPayment       = "invalid payment payload"
+	reasonRequirementsMismatch = "payment requirements mismatch"
+	reasonSettleFailed         = "payment settlement failed"
 )
 
 // PaymentFlowUpfront is the canonical x402 payment flow this gate
@@ -175,6 +177,10 @@ func (g *Gate) Wrap(next http.Handler) http.Handler {
 			g.write402(w, reasonInvalidPayment, "")
 			return
 		}
+		if !paymentRequirementsMatchAccepted(g.requirements, payload.Accepted) {
+			g.write402(w, reasonRequirementsMismatch, "")
+			return
+		}
 
 		settleCtx, cancel := context.WithTimeout(r.Context(), g.requestTimeout)
 		requirements := g.requirements
@@ -262,6 +268,58 @@ func decodePaymentPayload(raw string) (*types.PaymentPayload, bool) {
 		}
 	}
 	return nil, false
+}
+
+// paymentRequirementsMatchAccepted checks that the client is paying against
+// the contract this gate advertised. Core payment terms must match exactly,
+// while server-declared Extra fields must be preserved by the client; clients
+// may add extra fields of their own.
+func paymentRequirementsMatchAccepted(required, accepted types.PaymentRequirements) bool {
+	if required.Scheme != accepted.Scheme ||
+		required.Network != accepted.Network ||
+		required.Asset != accepted.Asset ||
+		required.Amount != accepted.Amount ||
+		required.PayTo != accepted.PayTo ||
+		required.MaxTimeoutSeconds != accepted.MaxTimeoutSeconds {
+		return false
+	}
+	if required.Extra == nil {
+		return true
+	}
+	return objectContainsSubset(normalizeJSONValue(required.Extra), normalizeJSONValue(accepted.Extra))
+}
+
+// normalizeJSONValue converts typed Go values to the generic shapes produced
+// when PaymentPayload is decoded from JSON, avoiding false mismatches such as
+// int(2) versus float64(2) inside Extra.
+func normalizeJSONValue(value interface{}) interface{} {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return value
+	}
+	var normalized interface{}
+	if err := json.Unmarshal(raw, &normalized); err != nil {
+		return value
+	}
+	return normalized
+}
+
+func objectContainsSubset(expected, actual interface{}) bool {
+	expectedMap, expectedOK := expected.(map[string]interface{})
+	if !expectedOK {
+		return reflect.DeepEqual(expected, actual)
+	}
+	actualMap, actualOK := actual.(map[string]interface{})
+	if !actualOK {
+		return false
+	}
+	for key, value := range expectedMap {
+		actualValue, ok := actualMap[key]
+		if !ok || !objectContainsSubset(value, actualValue) {
+			return false
+		}
+	}
+	return true
 }
 
 // receiptOf encodes the settlement response as the base64 receipt carried in

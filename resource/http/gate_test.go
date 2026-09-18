@@ -109,10 +109,12 @@ func newTestGate(t *testing.T, mutate func(*Config)) (*Gate, *stubFacilitator) {
 }
 
 func v2Payload() types.PaymentPayload {
+	accepted := testRequirements
+	accepted.Extra = map[string]interface{}{"paymentFlow": PaymentFlowUpfront}
 	return types.PaymentPayload{
 		X402Version: int(types.X402VersionV2),
 		Payload:     map[string]interface{}{"authorization": "0xsig"},
-		Accepted:    testRequirements,
+		Accepted:    accepted,
 	}
 }
 
@@ -210,6 +212,47 @@ func TestWrapPaidRequestSettlesAndForwards(t *testing.T) {
 	require.Equal(t, "0xsettled", settlement.Transaction)
 	require.Equal(t, types.Network("eip155:84532"), settlement.Network)
 	require.Equal(t, "0xpayer", settlement.Payer)
+}
+
+func TestWrapRejectsMismatchedAcceptedRequirements(t *testing.T) {
+	cases := []struct {
+		name   string
+		mutate func(*types.PaymentPayload)
+	}{
+		{
+			name: "core payment term",
+			mutate: func(payload *types.PaymentPayload) {
+				payload.Accepted.Amount = "1"
+			},
+		},
+		{
+			name: "missing advertised payment flow",
+			mutate: func(payload *types.PaymentPayload) {
+				payload.Accepted.Extra = nil
+			},
+		},
+		{
+			name: "conflicting payment flow",
+			mutate: func(payload *types.PaymentPayload) {
+				payload.Accepted.Extra["paymentFlow"] = "authorization"
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gate, stub := newTestGate(t, nil)
+			payload := v2Payload()
+			tc.mutate(&payload)
+
+			rec := httptest.NewRecorder()
+			gate.Wrap(okHandler).ServeHTTP(rec, paidRequest(t, payload))
+
+			require.Equal(t, http.StatusPaymentRequired, rec.Code)
+			require.Zero(t, stub.settleCalls, "mismatched accepted requirements must not reach settlement")
+			body := decodeChallenge(t, rec)
+			require.Equal(t, "payment requirements mismatch", body.Error)
+		})
+	}
 }
 
 func TestWrapSettleTimeoutChallenges(t *testing.T) {
