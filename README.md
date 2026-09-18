@@ -68,6 +68,60 @@ rejected:
   confirmed and successful; on-chain failures and confirmation timeouts
   are structured settlement failures
 
+## Resource server (HTTP integration)
+
+`resource/http` (package `x402http`) is a chain-blind, application-blind
+payment gate for `net/http` services. The gate owns the x402 wire surface:
+it parses the inbound `X-PAYMENT` header (with legacy `PAYMENT-SIGNATURE`
+fallback), answers unpaid and undecodable requests with a `402` challenge
+carrying the accepted requirements, settles paid requests through a
+`Facilitator` **before** the resource handler runs, publishes the base64
+settlement receipt in `PAYMENT-RESPONSE` / `X-PAYMENT-RESPONSE` headers, and
+strips every payment header from the forwarded request. `Methods` lists the
+paid HTTP methods; leave it empty to gate every method.
+
+```go
+import (
+	"net/http"
+
+	"github.com/gosuda/x402-facilitator/facilitator"
+	x402http "github.com/gosuda/x402-facilitator/resource/http"
+	"github.com/gosuda/x402-facilitator/types"
+)
+
+fac, err := facilitator.NewFacilitator(
+	types.Exact, "eip155:84532", "https://sepolia.base.org", privateKeyHex)
+if err != nil {
+	return err
+}
+
+gate, err := x402http.New(x402http.Config{
+	Requirements: types.PaymentRequirements{
+		Scheme:  string(types.Exact),
+		Network: "eip155:84532",
+		Asset:   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		Amount:  "10000",
+		PayTo:   "0xYourReceivingAddress",
+	},
+	Facilitator: fac,
+})
+if err != nil {
+	return err
+}
+
+mux := http.NewServeMux()
+mux.Handle("/paid-resource", gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// receipt headers are already set; the settlement is also on the context
+	settlement, _ := x402http.SettlementFrom(r.Context())
+	w.Write([]byte("paid: " + settlement.Transaction))
+})))
+```
+
+Anything satisfying the gate's two-method `Facilitator` interface works as
+the settlement backend: the local facilitators in this repository (EVM,
+Solana, Sui, Tron, Casper) and the remote `api/client.Client` for talking to
+a separate facilitator deployment.
+
 ## How to run
 
 ### Build binary
