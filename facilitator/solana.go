@@ -3,6 +3,7 @@ package facilitator
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 
 	"github.com/blocto/solana-go-sdk/client"
@@ -18,7 +19,14 @@ type SolanaFacilitator struct {
 }
 
 func NewSolanaFacilitator(network string, url string, privateKeyHex string) (*SolanaFacilitator, error) {
-	client := client.NewClient(url)
+	if network == "" {
+		return nil, fmt.Errorf("network is required")
+	}
+	if url == "" {
+		return nil, fmt.Errorf("rpc url is required")
+	}
+
+	solClient := client.NewClient(url)
 
 	privKey, err := hex.DecodeString(privateKeyHex)
 	if err != nil {
@@ -32,17 +40,21 @@ func NewSolanaFacilitator(network string, url string, privateKeyHex string) (*So
 
 	return &SolanaFacilitator{
 		scheme:   types.Exact,
-		client:   client,
+		client:   solClient,
 		feePayer: feePayer,
 	}, nil
 }
 
+// ErrNotImplemented reports that the Solana facilitator cannot yet verify
+// or settle payments; it stays gated from discovery until a v2 follow-up lands.
+var ErrNotImplemented = errors.New("solana facilitator not implemented")
+
 func (t *SolanaFacilitator) Verify(ctx context.Context, payload *types.PaymentPayload, req *types.PaymentRequirements) (*types.PaymentVerifyResponse, error) {
-	return nil, nil
+	return nil, fmt.Errorf("%w: verify", ErrNotImplemented)
 }
 
 func (t *SolanaFacilitator) Settle(ctx context.Context, payload *types.PaymentPayload, req *types.PaymentRequirements) (*types.PaymentSettleResponse, error) {
-	return nil, nil
+	return nil, fmt.Errorf("%w: settle", ErrNotImplemented)
 }
 
 // Supported returns nil: Verify and Settle are not yet v2-compliant, so

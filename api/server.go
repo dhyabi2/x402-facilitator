@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	_ "github.com/gosuda/x402-facilitator/api/swagger"
@@ -46,6 +47,15 @@ func NewServer(facilitator facilitator.Facilitator) *server {
 	return s
 }
 
+// checkX402Version rejects payment payloads that do not target the v2
+// protocol, the only version this facilitator implements.
+func checkX402Version(version int) error {
+	if version != int(types.X402VersionV2) {
+		return echo.NewHTTPError(http.StatusBadRequest, fmt.Sprintf("unsupported x402Version %d: only v2 (%d) is supported", version, int(types.X402VersionV2)))
+	}
+	return nil
+}
+
 // Settle handles payment settlement requests
 // @Summary      Settle payment
 // @Description  Settle a payment using the facilitator
@@ -63,6 +73,10 @@ func (s *server) Settle(c echo.Context) error {
 	settleRequest := &types.PaymentSettleRequest{}
 	if err := json.NewDecoder(c.Request().Body).Decode(settleRequest); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Received malformed settlement request")
+	}
+
+	if err := checkX402Version(settleRequest.PaymentPayload.X402Version); err != nil {
+		return err
 	}
 
 	settle, err := s.facilitator.Settle(ctx, &settleRequest.PaymentPayload, &settleRequest.PaymentRequirements)
@@ -90,6 +104,10 @@ func (s *server) Verify(c echo.Context) error {
 	requirement := &types.PaymentVerifyRequest{}
 	if err := json.NewDecoder(c.Request().Body).Decode(requirement); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "Received malformed payment requirements")
+	}
+
+	if err := checkX402Version(requirement.PaymentPayload.X402Version); err != nil {
+		return err
 	}
 
 	verified, err := s.facilitator.Verify(ctx, &requirement.PaymentPayload, &requirement.PaymentRequirements)
