@@ -141,6 +141,35 @@ the settlement backend: the local facilitators in this repository (EVM,
 Solana, Sui, Tron, Casper) and the remote `api/client.Client` for talking to
 a separate facilitator deployment.
 
+## Remote facilitator
+
+`facilitator/remote` (package `remote`) is the reusable adapter for resource
+servers that settle through a hosted facilitator instead of a local chain
+implementation — no chain SDK is imported, so remote-only consumers keep a
+minimal module graph. Networks are advertised statically in `/supported`;
+credentials are injected per operation.
+
+```go
+import "github.com/gosuda/x402-facilitator/facilitator/remote"
+
+f, err := remote.New("https://facilitator.example",
+	remote.WithNetworks("casper:casper", "casper:casper-test"),
+	remote.WithAuthHeader(func() (map[string]map[string]string, error) {
+		tok, err := readToken()
+		if err != nil {
+			return nil, err
+		}
+		return map[string]map[string]string{
+			"verify": {"Authorization": "Bearer " + tok},
+			"settle": {"Authorization": "Bearer " + tok},
+		}, nil
+	}),
+)
+
+// plugs into the gate as-is:
+handler := gate.Wrap(next) // gate built with x402http.Config{Facilitator: f, ...}
+```
+
 ## How to run
 
 ### Build binary
