@@ -17,6 +17,7 @@ func TestNewValidation(t *testing.T) {
 		return Config{
 			Requirements: testRequirements,
 			Facilitator:  &stubFacilitator{},
+			Resource:     testResource,
 		}
 	}
 	cases := []struct {
@@ -75,8 +76,10 @@ func TestNewNormalizesExtraPaymentFlow(t *testing.T) {
 	})
 	require.NoError(t, err)
 	handler := gate.Wrap(okHandler)
+	payload := v2Payload()
+	payload.Accepted.Extra["assetVersion"] = "2"
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, paidRequest(t, v2Payload()))
+	handler.ServeHTTP(rec, paidRequest(t, payload))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.NotNil(t, stub.reqs)
