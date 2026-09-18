@@ -106,8 +106,8 @@ import (
 )
 
 // Chain facilitators are composed explicitly. The EVM one lives in the
-// scheme/evm module (separate go.mod); the Solana/Sui/Tron/Casper ones are
-// in the root module's facilitator package.
+// scheme/evm module (separate go.mod); the Solana/Sui/Tron/Casper ones live
+// under scheme/<chain>/facilitator in the root module.
 fac, err := evmfacilitator.NewEVMFacilitator(
 	"eip155:84532", "https://sepolia.base.org", privateKeyHex)
 if err != nil {
@@ -141,9 +141,9 @@ mux.Handle("/paid-resource", gate.Wrap(http.HandlerFunc(func(w http.ResponseWrit
 
 Anything satisfying the gate's two-method `Facilitator` interface works as
 the settlement backend: the chain facilitators in this repository (EVM from
-`scheme/evm`; Solana, Sui, Tron, Casper from the root `facilitator`
-package) and the remote `api/client.Client` for talking to a separate
-facilitator deployment.
+`scheme/evm/facilitator`; Solana, Sui, Tron, Casper from
+`scheme/<chain>/facilitator`) and the remote `api/client.Client` for talking
+to a separate facilitator deployment.
 
 ## Module layout
 
