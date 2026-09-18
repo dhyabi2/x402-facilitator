@@ -18,6 +18,7 @@ func TestNewFacilitatorRoutesNetworks(t *testing.T) {
 		network string
 	}{
 		{name: "unknown eip155 network rejected by evm constructor", scheme: types.Exact, network: "eip155:999999"},
+		{name: "unsupported scheme rejected before evm dispatch", scheme: types.Scheme("upto"), network: "eip155:84532"},
 		{name: "non-evm networks pass through to the root factory", scheme: types.Exact, network: "casper:casper-dev"},
 	}
 

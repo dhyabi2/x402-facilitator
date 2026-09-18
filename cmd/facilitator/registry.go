@@ -13,6 +13,9 @@ import (
 // binary's build, and that choice belongs to the distribution, not the
 // library.
 func newFacilitator(scheme types.Scheme, network, rpcURL, privateKeyHex string) (facilitator.Facilitator, error) {
+	if scheme != types.Exact {
+		return facilitator.NewFacilitator(scheme, network, rpcURL, privateKeyHex)
+	}
 	if strings.HasPrefix(network, "eip155:") {
 		return evmfacilitator.NewEVMFacilitator(network, rpcURL, privateKeyHex)
 	}
