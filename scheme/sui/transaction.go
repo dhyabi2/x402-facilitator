@@ -3,6 +3,7 @@ package sui
 import (
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -297,24 +298,11 @@ func ExecuteGaslessStablecoinObjectBalancePayment(ctx context.Context, payment G
 	if NormalizeAddress(signer.Address()) != sender {
 		return nil, fmt.Errorf("signer address %s does not match sender %s", signer.Address(), sender)
 	}
-	recipient := NormalizeAddress(payment.Recipient)
-	if recipient == "" {
-		return nil, errors.New("empty recipient")
-	}
+	payment.Sender = sender
 
-	paymentAmount, err := strconv.ParseUint(strings.TrimSpace(payment.Amount), 10, 64)
-	if err != nil || paymentAmount == 0 {
-		return nil, fmt.Errorf("invalid amount: %s", payment.Amount)
-	}
-
-	coinType, err := resolveGaslessStablecoinAsset(payment.Network, payment.Asset)
+	prepared, err := PreparePayment(ctx, payment)
 	if err != nil {
 		return nil, err
-	}
-
-	result := &GaslessStablecoinObjectBalancePaymentResult{
-		PaymentAmount:  strconv.FormatUint(paymentAmount, 10),
-		PreparedAmount: "0",
 	}
 
 	client, err := NewClientForNetwork(payment.Network, payment.Endpoints)
@@ -323,66 +311,18 @@ func ExecuteGaslessStablecoinObjectBalancePayment(ctx context.Context, payment G
 	}
 	defer client.Close()
 
-	balance, err := client.Balance(ctx, sender, coinType)
-	if err != nil {
-		return nil, err
+	result := &GaslessStablecoinObjectBalancePaymentResult{
+		CoinObjects:    prepared.CoinObjects,
+		PreparedAmount: prepared.ConsolidationAmount,
+		PaymentAmount:  prepared.PaymentAmount,
 	}
-	var nonZeroCoinObjects []OwnedCoinObject
-	var prepareAmount uint64
-	if balance.AddressBalance < paymentAmount {
-		if balance.CoinBalance < paymentAmount-balance.AddressBalance {
-			return nil, fmt.Errorf("insufficient %s balance: need %d, address balance %d, coin object balance %d", coinType, paymentAmount, balance.AddressBalance, balance.CoinBalance)
-		}
 
-		coinObjects, err := client.ListOwnedCoinObjects(ctx, sender, coinType)
+	if prepared.ConsolidationTransaction != "" {
+		consolidationTxBytes, err := base64.StdEncoding.DecodeString(prepared.ConsolidationTransaction)
 		if err != nil {
 			return nil, err
 		}
-		nonZeroCoinObjects = make([]OwnedCoinObject, 0, len(coinObjects))
-		for _, coinObject := range coinObjects {
-			if coinObject.Balance == 0 {
-				continue
-			}
-			nonZeroCoinObjects = append(nonZeroCoinObjects, coinObject)
-		}
-		result.CoinObjects = nonZeroCoinObjects
-
-		for _, coinObject := range nonZeroCoinObjects {
-			if prepareAmount > ^uint64(0)-coinObject.Balance {
-				return nil, errors.New("coin object balance sum overflows uint64")
-			}
-			prepareAmount += coinObject.Balance
-		}
-
-		if prepareAmount < paymentAmount-balance.AddressBalance {
-			return nil, fmt.Errorf("insufficient %s balance: need %d, address balance %d, coin object balance %d", coinType, paymentAmount, balance.AddressBalance, prepareAmount)
-		}
-	}
-
-	info := GetNetworkInfo(payment.Network)
-	if info == nil {
-		return nil, fmt.Errorf("unsupported Sui network %q", payment.Network)
-	}
-	expiration, err := client.ResolveGaslessStablecoinExpiration(ctx, info.ChainDigest)
-	if err != nil {
-		return nil, err
-	}
-
-	if prepareAmount > 0 {
-		result.PreparedAmount = strconv.FormatUint(prepareAmount, 10)
-		prepareTxBytes, err := BuildCoinObjectsToAddressBalanceTransferTransaction(ctx, CoinObjectsToAddressBalanceTransfer{
-			Sender:      sender,
-			Recipient:   sender,
-			Network:     payment.Network,
-			Asset:       payment.Asset,
-			CoinObjects: nonZeroCoinObjects,
-			Endpoints:   payment.Endpoints,
-			Expiration:  expiration,
-		})
-		if err != nil {
-			return nil, err
-		}
-		preparePayload, err := NewSignedPayload(prepareTxBytes, signer)
+		preparePayload, err := NewSignedPayload(consolidationTxBytes, signer)
 		if err != nil {
 			return nil, err
 		}
@@ -396,15 +336,7 @@ func ExecuteGaslessStablecoinObjectBalancePayment(ctx context.Context, payment G
 		result.PrepareTransaction = prepareResult
 	}
 
-	paymentTxBytes, err := BuildGaslessStablecoinTransferTransaction(ctx, GaslessStablecoinTransfer{
-		Sender:     sender,
-		Recipient:  recipient,
-		Network:    payment.Network,
-		Asset:      payment.Asset,
-		Amount:     result.PaymentAmount,
-		Endpoints:  payment.Endpoints,
-		Expiration: expiration,
-	})
+	paymentTxBytes, err := base64.StdEncoding.DecodeString(prepared.PaymentTransaction)
 	if err != nil {
 		return nil, err
 	}
