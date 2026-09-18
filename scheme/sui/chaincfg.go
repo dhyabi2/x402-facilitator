@@ -1,8 +1,11 @@
 package sui
 
 import (
+	"errors"
+	"fmt"
 	"maps"
 	"slices"
+	"strings"
 )
 
 type NetworkInfo struct {
@@ -117,6 +120,85 @@ func GetGaslessStablecoinDecimals(network, asset string) (uint8, bool) {
 	return 0, false
 }
 
+// Stablecoin amount conversion errors. Callers branch on them with errors.Is.
+var (
+	ErrInvalidStablecoinAmount = errors.New("invalid stablecoin amount")
+	ErrStablecoinPrecision     = errors.New("stablecoin amount exceeds asset precision")
+	ErrUnknownStablecoinAsset  = errors.New("unknown stablecoin asset")
+)
+
+// StablecoinAmountToAtomic converts a human stablecoin amount, such as "0.01",
+// to its atomic-unit decimal string using the asset decimals registered for
+// the network (symbol or coin type accepted, same matching as
+// GetGaslessStablecoinDecimals). Amounts carrying more precision than the
+// asset decimals are rejected rather than truncated.
+func StablecoinAmountToAtomic(network, asset, amount string) (string, error) {
+	decimals, ok := GetGaslessStablecoinDecimals(network, asset)
+	if !ok {
+		return "", fmt.Errorf("%w: %s on %s", ErrUnknownStablecoinAsset, asset, network)
+	}
+	amount = strings.TrimSpace(amount)
+	if amount == "" {
+		return "", fmt.Errorf("%w: %q", ErrInvalidStablecoinAmount, amount)
+	}
+	if strings.HasPrefix(amount, "-") {
+		return "", fmt.Errorf("%w: %q", ErrInvalidStablecoinAmount, amount)
+	}
+	whole, frac, hasFrac := strings.Cut(amount, ".")
+	if whole == "" {
+		whole = "0"
+	}
+	if !isDigits(whole) || (hasFrac && !isDigits(frac)) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidStablecoinAmount, amount)
+	}
+	if len(frac) > int(decimals) {
+		if strings.Trim(frac[int(decimals):], "0") != "" {
+			return "", fmt.Errorf("%w: %s has more than %d decimals", ErrStablecoinPrecision, amount, decimals)
+		}
+		frac = frac[:int(decimals)]
+	}
+	atomic := strings.TrimLeft(whole+frac+strings.Repeat("0", int(decimals)-len(frac)), "0")
+	if atomic == "" {
+		atomic = "0"
+	}
+	return atomic, nil
+}
+
+// FormatStablecoinAtomicAmount renders an atomic-unit decimal string as a
+// human stablecoin amount using the asset decimals registered for the
+// network. The conversion is exact: no rounding, trailing fractional zeros
+// trimmed, e.g. "10000" -> "0.01". The atomic amount is not bounded to
+// uint64 here; callers bound the value where their wire format requires.
+func FormatStablecoinAtomicAmount(network, asset, atomic string) (string, error) {
+	decimals, ok := GetGaslessStablecoinDecimals(network, asset)
+	if !ok {
+		return "", fmt.Errorf("%w: %s on %s", ErrUnknownStablecoinAsset, asset, network)
+	}
+	if !isDigits(atomic) {
+		return "", fmt.Errorf("%w: %q", ErrInvalidStablecoinAmount, atomic)
+	}
+	// Split the digit string at the decimal point instead of scaling through
+	// a numeric type, so atomic amounts beyond uint64 stay exact.
+	var whole, frac string
+	switch {
+	case decimals == 0:
+		whole = atomic
+	case len(atomic) > int(decimals):
+		whole, frac = atomic[:len(atomic)-int(decimals)], atomic[len(atomic)-int(decimals):]
+	default:
+		whole, frac = "0", strings.Repeat("0", int(decimals)-len(atomic))+atomic
+	}
+	whole = strings.TrimLeft(whole, "0")
+	if whole == "" {
+		whole = "0"
+	}
+	frac = strings.TrimRight(frac, "0")
+	if frac == "" {
+		return whole, nil
+	}
+	return whole + "." + frac, nil
+}
+
 func stablecoinTypeInMap(stablecoinTypes map[string]string, coinType string) (string, bool) {
 	normalizedCoinType := NormalizeType(coinType)
 	for symbol, candidate := range stablecoinTypes {
@@ -210,4 +292,16 @@ func defaultStablecoinDecimalsBySymbol() map[string]uint8 {
 		"AUSD":     6,
 		"USDB":     6,
 	}
+}
+
+func isDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
