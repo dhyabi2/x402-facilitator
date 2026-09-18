@@ -3,8 +3,8 @@ module github.com/gosuda/x402-facilitator/cmd
 go 1.24.2
 
 require (
-	github.com/gosuda/x402-facilitator v0.0.0
-	github.com/gosuda/x402-facilitator/scheme/evm v0.0.0
+	github.com/gosuda/x402-facilitator v0.0.4
+	github.com/gosuda/x402-facilitator/scheme/evm v0.0.1
 	github.com/knadh/koanf/parsers/toml v0.1.0
 	github.com/knadh/koanf/providers/file v1.2.1
 	github.com/knadh/koanf/v2 v2.3.6
@@ -84,7 +84,5 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
-
-replace github.com/gosuda/x402-facilitator => ../
 
 replace github.com/gosuda/x402-facilitator/scheme/evm => ../scheme/evm

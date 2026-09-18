@@ -7,21 +7,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestNewFacilitatorRoutesNetworks pins the dispatch table of the shipped
-// binary: each CAIP-2 family reaches its own chain implementation, and
-// unknown networks or schemes are rejected before any construction work.
-// Error paths only — successful construction dials live endpoints and is
-// covered by the chain packages' on-chain integration tests.
+// TestNewFacilitatorRoutesNetworks pins the registry's eip155 routing (the
+// case the root factory cannot carry) and the passthrough to the root
+// factory. Error paths only — successful construction dials live endpoints
+// and is covered by the chain packages' on-chain integration tests.
 func TestNewFacilitatorRoutesNetworks(t *testing.T) {
 	tests := []struct {
 		name    string
 		scheme  types.Scheme
 		network string
 	}{
-		{name: "unknown eip155 network", scheme: types.Exact, network: "eip155:999999"},
-		{name: "unsupported casper network", scheme: types.Exact, network: "casper:casper-dev"},
-		{name: "unsupported scheme", scheme: types.Scheme("upto"), network: "eip155:84532"},
-		{name: "tron fails fast", scheme: types.Exact, network: "tron:mainnet"},
+		{name: "unknown eip155 network rejected by evm constructor", scheme: types.Exact, network: "eip155:999999"},
+		{name: "non-evm networks pass through to the root factory", scheme: types.Exact, network: "casper:casper-dev"},
 	}
 
 	for _, tt := range tests {

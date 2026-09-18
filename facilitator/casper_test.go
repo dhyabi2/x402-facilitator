@@ -405,3 +405,33 @@ func TestCasperFacilitatorSettle(t *testing.T) {
 		})
 	}
 }
+
+func TestNewFacilitatorRoutesCasperNetworks(t *testing.T) {
+	tests := []struct {
+		name    string
+		scheme  types.Scheme
+		network string
+		wantErr bool
+	}{
+		{name: "mainnet", scheme: types.Exact, network: casperscheme.NetworkMainnet},
+		{name: "testnet", scheme: types.Exact, network: casperscheme.NetworkTestnet},
+		{name: "unsupported casper network", scheme: types.Exact, network: "casper:casper-dev", wantErr: true},
+		{name: "unsupported scheme", scheme: types.Scheme("upto"), network: casperscheme.NetworkMainnet, wantErr: true},
+		{name: "evm routes out of the root factory", scheme: types.Exact, network: "eip155:84532", wantErr: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			instance, err := NewFacilitator(tt.scheme, tt.network, "https://casper.example.invalid", "")
+			if tt.wantErr {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			casperFacilitator, ok := instance.(*CasperFacilitator)
+			require.True(t, ok)
+			require.Equal(t, tt.network, casperFacilitator.Supported().Kinds[0].Network)
+			require.NoError(t, casperFacilitator.Close())
+		})
+	}
+}
