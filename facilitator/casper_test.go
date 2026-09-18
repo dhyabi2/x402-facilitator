@@ -417,6 +417,7 @@ func TestNewFacilitatorRoutesCasperNetworks(t *testing.T) {
 		{name: "testnet", scheme: types.Exact, network: casperscheme.NetworkTestnet},
 		{name: "unsupported casper network", scheme: types.Exact, network: "casper:casper-dev", wantErr: true},
 		{name: "unsupported scheme", scheme: types.Scheme("upto"), network: casperscheme.NetworkMainnet, wantErr: true},
+		{name: "evm routes out of the root factory", scheme: types.Exact, network: "eip155:84532", wantErr: true},
 	}
 
 	for _, tt := range tests {

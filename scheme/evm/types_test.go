@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/ethereum/go-ethereum/common"
-	"github.com/gosuda/x402-facilitator/internal/sdk"
+	"github.com/gosuda/x402-facilitator/scheme/evm/internal/sdk"
 	"github.com/stretchr/testify/require"
 )
 
