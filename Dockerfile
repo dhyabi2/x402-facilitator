@@ -2,11 +2,8 @@ FROM golang:1.24.3 AS builder
 
 WORKDIR /app
 
-COPY go.mod go.sum ./
-
-RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -o facilitator ./cmd/facilitator
+RUN cd cmd && CGO_ENABLED=0 go build -o /app/facilitator ./facilitator
 
 FROM debian:stable-slim
 

@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/gosuda/x402-facilitator/api"
-	"github.com/gosuda/x402-facilitator/facilitator"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"github.com/spf13/cobra"
@@ -45,7 +44,7 @@ func run() {
 	}
 	log.Logger = zerolog.New(os.Stdout).With().Timestamp().Caller().Logger()
 
-	paymentFacilitator, err := facilitator.NewFacilitator(config.Scheme, config.Network, config.Url, config.PrivateKey)
+	paymentFacilitator, err := newFacilitator(config.Scheme, config.Network, config.Url, config.PrivateKey)
 	if err != nil {
 		log.Fatal().Err(err).Msg("Failed to init facilitator, shutting down...")
 	}

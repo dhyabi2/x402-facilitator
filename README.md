@@ -141,6 +141,25 @@ the settlement backend: the local facilitators in this repository (EVM,
 Solana, Sui, Tron, Casper) and the remote `api/client.Client` for talking to
 a separate facilitator deployment.
 
+## Module layout
+
+The repository is split into three Go modules so consumers never inherit
+chain SDKs they do not use:
+
+| Module (directory) | Contents | Pulls |
+|---|---|---|
+| `github.com/gosuda/x402-facilitator` (root) | `types`, `resource/http`, `api`, `facilitator` (interface + Solana/Sui/Tron/Casper), `scheme/{sui,casper,solana}`, `utils` | no go-ethereum, no x402 SDK |
+| `github.com/gosuda/x402-facilitator/scheme/evm` (`scheme/evm/`) | EVM scheme, EIP-3009/Permit2, EVM facilitator, SDK wire-compat guard | go-ethereum, x402-foundation |
+| `github.com/gosuda/x402-facilitator/cmd` (`cmd/`) | `x402-facilitator` + `x402-client` binaries and the scheme dispatch | root + scheme/evm |
+
+Dependencies are one-directional: `scheme/evm` requires the root module,
+and `cmd` requires both — the root module never requires the EVM module,
+so a Sui-only or remote-facilitator consumer imports the root module and
+inherits no go-ethereum graph. The scheme dispatch that used to live in
+the root `facilitator` package now ships with the binaries
+(`cmd/facilitator/registry.go`): libraries compose chains explicitly,
+distributions choose which chain SDKs they include.
+
 ## How to run
 
 ### Build binary

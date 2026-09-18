@@ -1,8 +1,8 @@
 ROOT_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 
 build:
-	go build -o $(ROOT_DIR)/bin/x402-facilitator $(ROOT_DIR)/cmd/facilitator
-	go build -o $(ROOT_DIR)/bin/x402-client $(ROOT_DIR)/cmd/client
+	cd $(ROOT_DIR)cmd && go build -o $(ROOT_DIR)bin/x402-facilitator ./facilitator
+	cd $(ROOT_DIR)cmd && go build -o $(ROOT_DIR)bin/x402-client ./client
 
 build-docker:
 	docker buildx build \

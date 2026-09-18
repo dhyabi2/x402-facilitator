@@ -14,6 +14,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/ethclient"
 
+	x402facilitator "github.com/gosuda/x402-facilitator/facilitator"
 	"github.com/gosuda/x402-facilitator/scheme/evm"
 	"github.com/gosuda/x402-facilitator/scheme/evm/eip3009"
 	"github.com/gosuda/x402-facilitator/scheme/evm/permit2"
@@ -21,7 +22,7 @@ import (
 	"github.com/gosuda/x402-facilitator/utils"
 )
 
-var _ Facilitator = (*EVMFacilitator)(nil)
+var _ x402facilitator.Facilitator = (*EVMFacilitator)(nil)
 
 type EVMFacilitator struct {
 	mu        sync.RWMutex
