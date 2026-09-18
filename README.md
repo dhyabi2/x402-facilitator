@@ -68,6 +68,79 @@ rejected:
   confirmed and successful; on-chain failures and confirmation timeouts
   are structured settlement failures
 
+## Resource server (HTTP integration)
+
+`resource/http` (package `x402http`) is a chain-blind, application-blind
+payment gate for `net/http` services. The gate owns the x402 wire surface:
+it parses the inbound `PAYMENT-SIGNATURE` header (canonical v2; legacy
+`X-PAYMENT` accepted as a fallback), answers unpaid and undecodable requests
+with a `402` challenge carrying the resource metadata and accepted
+requirements, settles paid requests through a `Facilitator` **before** the
+resource handler runs, publishes the base64 settlement receipt in
+`PAYMENT-RESPONSE` / `X-PAYMENT-RESPONSE` headers, and strips every payment
+header from the forwarded request. Which routes or HTTP methods are paid is
+application policy: wrap exactly the handlers that should be paid.
+
+Phase 1 implements the canonical **upfront** flow only: the gate settles
+before the resource handler runs and normalizes the accepted requirements to
+`extra.paymentFlow = "upfront"` — without it, clients would misread the
+requirements as the default `authorization` flow — and rejects a configured
+`extra.paymentFlow` that conflicts with `upfront`. The remaining canonical
+flows (`authorization`, `escrow`) are future phases.
+
+The gate also owns payment cache policy: 402 challenges and settlement
+failures are `Cache-Control: no-store`, and any response carrying a
+settlement receipt gains the `private` directive so a shared proxy or CDN
+cannot serve a paid response without the gate running. A structured
+settlement failure (`Success: false`) still carries its `PAYMENT-RESPONSE`
+receipt on the 402, so a client can tell a pending broadcast from a payable
+failure instead of paying blindly again.
+
+```go
+import (
+	"net/http"
+
+	"github.com/gosuda/x402-facilitator/facilitator"
+	x402http "github.com/gosuda/x402-facilitator/resource/http"
+	"github.com/gosuda/x402-facilitator/types"
+)
+
+fac, err := facilitator.NewFacilitator(
+	types.Exact, "eip155:84532", "https://sepolia.base.org", privateKeyHex)
+if err != nil {
+	return err
+}
+
+gate, err := x402http.New(x402http.Config{
+	Requirements: types.PaymentRequirements{
+		Scheme:  string(types.Exact),
+		Network: "eip155:84532",
+		Asset:   "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+		Amount:  "10000",
+		PayTo:   "0xYourReceivingAddress",
+	},
+	Facilitator: fac,
+	Resource: &types.ResourceInfo{
+		URL: "https://your.example/paid-resource",
+	},
+})
+if err != nil {
+	return err
+}
+
+mux := http.NewServeMux()
+mux.Handle("/paid-resource", gate.Wrap(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// receipt headers are already set; the settlement is also on the context
+	settlement, _ := x402http.SettlementFrom(r.Context())
+	w.Write([]byte("paid: " + settlement.Transaction))
+})))
+```
+
+Anything satisfying the gate's two-method `Facilitator` interface works as
+the settlement backend: the local facilitators in this repository (EVM,
+Solana, Sui, Tron, Casper) and the remote `api/client.Client` for talking to
+a separate facilitator deployment.
+
 ## How to run
 
 ### Build binary
