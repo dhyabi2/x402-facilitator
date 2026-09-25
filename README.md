@@ -13,9 +13,9 @@ x402 v2 treats the payment **scheme** (the on-chain protocol used to move
 funds) and the **network** (which chain that protocol runs on) as two
 independent axes. This facilitator currently supports:
 
-| Scheme  | `eip155:*` (EVM) | `solana:*` | `sui:*` | `tron:*` | `casper:*` |
-|---------|:----------------:|:----------:|:-------:|:--------:|:----------:|
-| `exact` |        ✅        |     ✅     |   🚧    |    🚧    |     ✅     |
+| Scheme  | `eip155:*` (EVM) | `solana:*` | `sui:*` | `tron:*` | `casper:*` | `nano:*` |
+|---------|:----------------:|:----------:|:-------:|:--------:|:----------:|:--------:|
+| `exact` |        ✅        |     ✅     |   🚧    |    🚧    |     ✅     |    ✅    |
 
 Networks are specified in [CAIP-2](https://chainagnostic.org/CAIPs/caip-2)
 format (e.g. `eip155:84532` for Base Sepolia, `eip155:8453` for Base
@@ -23,6 +23,21 @@ mainnet, `eip155:42161` for Arbitrum One). The `exact` scheme supports
 both EIP-3009 `transferWithAuthorization` and Permit2
 `PermitWitnessTransferFrom` payloads on EVM chains; see the `--method`
 flag on `x402-client` to pick between them.
+
+### Nano
+
+Nano is addressed as `nano:mainnet`. It is a feeless DAG ledger: the payer
+broadcasts its own signed `send` block directly to the network and
+publication is finality, so this facilitator holds **no custody key** — there
+is no broadcast, no gas token and nothing to sign. `url` is a Nano node RPC
+endpoint the facilitator reads settlement through (defaults to a public node).
+The native coin is identified as the `xno` asset; amounts are integer raw units
+(1 XNO = 10^30 raw). Verification reads the amount, destination (`link` decoded
+to an address) and subtype from the on-chain block — never from the request
+body — and `Settle` is the same stateless re-verification, returning the block
+hash as the on-chain proof of payment. Set `extra.confirmRequired` to `true` in
+the requirements to require the block to be confirmed (cemented) before it is
+accepted.
 
 ### Casper
 

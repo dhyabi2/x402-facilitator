@@ -39,6 +39,10 @@ func TestNewFacilitatorRoutesNetworks(t *testing.T) {
 		{name: "sui prefix routes to sui constructor", scheme: types.Exact, network: "sui:", notContains: "expected a CAIP-2 identifier", errContains: []string{"unsupported Sui network"}},
 		{name: "tron prefix routes to tron constructor", scheme: types.Exact, network: "tron:mainnet", errContains: []string{"not implemented"}},
 		{name: "casper prefix routes to casper constructor", scheme: types.Exact, network: "casper:", notContains: "expected a CAIP-2 identifier"},
+		// nano: with an empty suffix triggers the nano constructor's own
+		// validation error, proving the dispatch reached it (the default
+		// branch would have answered with the CAIP-2 message instead).
+		{name: "nano prefix routes to nano constructor", scheme: types.Exact, network: "nano:", errContains: []string{"invalid Nano network"}},
 	}
 
 	for _, tt := range tests {
