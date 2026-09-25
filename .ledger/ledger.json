@@ -58,7 +58,7 @@
  ],
  "blocks": {
   "1": {
-   "status": "pending",
+   "status": "pass",
    "attempts": [
     {
      "kind": "verify",
@@ -146,11 +146,47 @@
      "coverage_gaps": [],
      "injection": [],
      "at": "2026-09-25T15:26:07+00:00"
+    },
+    {
+     "kind": "verify",
+     "ok": true,
+     "refusable": true,
+     "results": [
+      {
+       "id": "L0",
+       "pass": true,
+       "oracle_exit": 0,
+       "oracle_ok": true,
+       "mutants": {
+        "total": 6,
+        "killed": 5
+       },
+       "judge": "deepseek/deepseek-v4-flash-0731",
+       "control": "passed"
+      },
+      {
+       "id": "L1",
+       "pass": true,
+       "oracle_exit": 0,
+       "oracle_ok": true,
+       "mutants": {
+        "total": 6,
+        "killed": 5
+       },
+       "judge": "deepseek/deepseek-v4-flash-0731",
+       "control": "passed"
+      }
+     ],
+     "pre_sig": "ae2e55a761177ae27df2ec5b1a794867538aafc9c21b0a1337fd5237910e9201",
+     "tier": "cheap",
+     "coverage_gaps": [],
+     "injection": [],
+     "at": "2026-09-25T15:28:33+00:00"
     }
    ]
   },
   "2": {
-   "status": "pending",
+   "status": "pass",
    "attempts": [
     {
      "kind": "verify",
@@ -185,6 +221,56 @@
      "coverage_gaps": [],
      "injection": [],
      "at": "2026-09-25T15:14:38+00:00"
+    },
+    {
+     "kind": "verify",
+     "ok": true,
+     "refusable": true,
+     "results": [
+      {
+       "id": "L0",
+       "pass": true,
+       "oracle_exit": 0,
+       "oracle_ok": true,
+       "mutants": {
+        "total": 6,
+        "killed": 5
+       },
+       "cached": true,
+       "judge": "deepseek/deepseek-v4-flash-0731",
+       "control": "passed"
+      },
+      {
+       "id": "L1",
+       "pass": true,
+       "oracle_exit": 0,
+       "oracle_ok": true,
+       "mutants": {
+        "total": 6,
+        "killed": 5
+       },
+       "cached": true,
+       "judge": "deepseek/deepseek-v4-flash-0731",
+       "control": "passed"
+      },
+      {
+       "id": "L2",
+       "pass": true,
+       "oracle_exit": 0,
+       "oracle_ok": true,
+       "mutants": {
+        "total": 6,
+        "killed": 1
+       },
+       "judge": "deepseek/deepseek-v4-flash-0731",
+       "control": "passed"
+      }
+     ],
+     "pre_sig": "acdb0cd0e125a0a5f187c0af65828b7baea1ed231f5046090f8718c33d3f99db",
+     "tier": "cheap",
+     "coverage_gaps": [],
+     "injection": [],
+     "at": "2026-09-25T15:30:04+00:00"
     }
    ]
   }
@@ -208,7 +294,36 @@
   }
  ],
  "contested": [],
- "probe": null,
+ "probe": {
+  "score": 67,
+  "results": [
+   {
+    "id": "L0",
+    "pass": true,
+    "oracle_exit": 0,
+    "oracle_ok": true,
+    "judge": "deepseek/deepseek-v4-flash-0731",
+    "control": "passed"
+   },
+   {
+    "id": "L1",
+    "pass": false,
+    "oracle_exit": 0,
+    "oracle_ok": true,
+    "judge": "deepseek/deepseek-v4-flash-0731",
+    "control": "passed"
+   },
+   {
+    "id": "L2",
+    "pass": true,
+    "oracle_exit": 0,
+    "oracle_ok": true,
+    "judge": "deepseek/deepseek-v4-flash-0731",
+    "control": "passed"
+   }
+  ],
+  "at": "2026-09-25T15:35:34+00:00"
+ },
  "events": [
   {
    "kind": "init",
@@ -362,6 +477,35 @@
    "at": "2026-09-25T15:26:57+00:00",
    "prev": "7d42435e25a9305c4c261a2f7357b64382a2c6d40a680deae5840c591409d47b",
    "receipt": "87e27fe8a77052e7e674e159908b7451c499dc639a84c7f775a1359e013b6df8"
+  },
+  {
+   "kind": "verify",
+   "payload": {
+    "block": "1",
+    "ok": true
+   },
+   "at": "2026-09-25T15:28:33+00:00",
+   "prev": "87e27fe8a77052e7e674e159908b7451c499dc639a84c7f775a1359e013b6df8",
+   "receipt": "9743a3c476938547032d9496c2f2a95216148866e7ce09c3840c525d71e7f7a6"
+  },
+  {
+   "kind": "verify",
+   "payload": {
+    "block": "2",
+    "ok": true
+   },
+   "at": "2026-09-25T15:30:04+00:00",
+   "prev": "9743a3c476938547032d9496c2f2a95216148866e7ce09c3840c525d71e7f7a6",
+   "receipt": "200140fa93e1916e561a7147d3e29d728cf7fe76e3cb2550455ddb398e0e2b34"
+  },
+  {
+   "kind": "probe",
+   "payload": {
+    "score": 67
+   },
+   "at": "2026-09-25T15:35:34+00:00",
+   "prev": "200140fa93e1916e561a7147d3e29d728cf7fe76e3cb2550455ddb398e0e2b34",
+   "receipt": "e6c30debc29d21ece4c31d9eb3b30760752cea389ffd44e46deebab39bc5dd72"
   }
  ]
 }

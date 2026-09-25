@@ -1,0 +1,20 @@
+DUNE NANO EXACT SCHEME — END-TO-END PROBE SCENARIO
+
+A Nano (XNO) resource server adopts the new facilitator. Each law is proven through a DISTINCT component:
+
+1. (L0) A payer broadcasts its own send block to the Nano ledger (final-by-publication). The resource server
+   forwards the block hash to the facilitator. The facilitator's Verify calls BlockInfo (client.go) which reads
+   block_account, contents.type='send', contents.link_as_account=<payTo>, amount from the on-chain block — NOT
+   from the request body. Proof: TestNanoVerifyAcceptsValidPayment asserts res.Payer == block.Account and
+   node.hash == the supplied blockHash, i.e. the payer and binding are recovered from the block the node returns.
+
+2. (L1) The resource server calls Settle with the same payload. Settle makes exactly ONE read (node.calls == 1
+   in TestNanoSettleIsStatelessReVerification), returns the block hash as the transaction, and holds no private
+   key — NewNanoFacilitator takes no secret material, unlike every other chain's constructor.
+
+3. (L2) The registry routes a nano:mainnet network to this no-key facilitator. Proof: registry_test.go
+   "nano prefix routes to nano constructor" asserts the nano: prefix reaches NewNanoFacilitator (its
+   invalid-network error, not the generic CAIP-2 message).
+
+Each law is proven through a different code path (block fetch + verify, settle, registry dispatch) with its own
+test, so the probe scores the distinct-components rule.

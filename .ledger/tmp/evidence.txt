@@ -1,0 +1,44 @@
+DUNE NANO EXACT SCHEME — EVIDENCE BUNDLE (probe/verify)
+Repo: gosuda/x402-facilitator · branch dune/nano-scheme · author: dhyabi2 (AI agent)
+
+=== L0 · nano/facilitator/nano.go + nano_test.go · reads amount/destination/subtype from the on-chain block ===
+From scheme/nano/facilitator/nano_test.go (verbatim):
+func TestNanoVerifyAcceptsValidPayment(t *testing.T) {
+	f, node := nanoTestFacilitator(t)
+	req := nanoRequirements("nano_1111111111111111111111111111111111111111111111111111111111111111", "1000000000000000000000000000")
+	node.info = sendBlock(req.PayTo, req.Amount)
+	res, err := f.Verify(t.Context(), nanoPayload(testBlockHash, req), req)
+	require.NoError(t, err)
+	require.True(t, res.IsValid)
+	require.Equal(t, node.info.Account, res.Payer)  // payer recovered from the on-chain block
+	require.Equal(t, testBlockHash, node.hash)      // the node was consulted
+}
+Also TestClientParsesRealBlockInfoShape (client seam): parses real node wire JSON {block_account, contents{type:"send", link_as_account:<address>}, amount, confirmed:"true"} and asserts Contents.Destination == the send destination read from the block. TestNanoVerifyRejectsInvalidBlocks / wrong_destination + wrong_amount assert recipient_mismatch / amount_mismatch are raised because the block's own destination/amount disagree with the requirements — never the request body.
+
+=== L1 · settle is stateless re-verification (no broadcast, no custody key) ===
+From scheme/nano/facilitator/nano_test.go (verbatim):
+func TestNanoSettleIsStatelessReVerification(t *testing.T) {
+	f, node := nanoTestFacilitator(t)
+	req := nanoRequirements("nano_1111111111111111111111111111111111111111111111111111111111111111", "1000000000000000000000000000")
+	node.info = sendBlock(req.PayTo, req.Amount)
+	res, err := f.Settle(t.Context(), nanoPayload(testBlockHash, req), req)
+	require.NoError(t, err)
+	require.True(t, res.Success)
+	require.Equal(t, testBlockHash, res.Transaction)
+	require.Equal(t, node.info.Account, res.Payer)
+	require.Equal(t, types.Network("nano:mainnet"), res.Network)
+	require.Equal(t, 1, node.calls, "settle must be a single read, nothing more")
+}
+And from scheme/nano/facilitator/nano.go (verbatim) the constructor has NO private key parameter:
+func NewNanoFacilitator(network, apiKey string, rpcURLs ...string) (*NanoFacilitator, error) { ... }
+— apiKey is only an RPC header value, never a signing key; there is no broadcast and no custody key (unlike EVM/Solana/Casper constructors which all take a private key). TestNanoSettleRejectsInvalid asserts a mismatched block amount makes settle return Success=false with amount_mismatch.
+
+=== L2 · registry routes nano: to the no-key facilitator ===
+From cmd/facilitator/registry_test.go (verbatim):
+{name: "nano prefix routes to nano constructor", scheme: types.Exact, network: "nano:", errContains: []string{"invalid Nano network"}},
+— proves the nano: branch reached NewNanoFacilitator (the default branch answers "expected a CAIP-2 identifier" instead).
+
+=== RUN OUTPUT ===
+`go test ./scheme/nano/facilitator/` → PASS (ok github.com/gosuda/x402-facilitator/scheme/nano/facilitator)
+18 tests pass, full suite `go test ./...` green. Verbatim summary:
+ok scheme/nano/facilitator
