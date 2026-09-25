@@ -135,3 +135,21 @@ func TestVerifyBlockFailClosedNotSend(t *testing.T) {
 		t.Fatalf("non-send block must fail")
 	}
 }
+
+func TestVerifyBlockDedupesDuplicateEndpoints(t *testing.T) {
+	// Duplicate or whitespace-padded copies of the same endpoint must count
+	// as ONE independent node, not several. Passing one real endpoint twice
+	// must fail closed (only 1 independent endpoint), not pass as if 2.
+	client := NewClientWithCallback(realBlock)
+	res := VerifyBlock(context.Background(), client,
+		[]string{"https://a", "https://a", "  https://a	"},
+		"ECCB8CB65CD3106EDA8CE9AA893FEAD497A91BCA903890CBD7A5C59F06AB9113",
+		"nano_1111111111111111111111111111111111111111111111111111hifc8npp",
+		"205676479000000000000000000000000000000")
+	if res.OK {
+		t.Fatalf("duplicate endpoints must dedupe to 1 independent node and fail closed")
+	}
+	if res.Reason == "" {
+		t.Fatalf("expected an insufficient-endpoints reason, got %+v", res)
+	}
+}

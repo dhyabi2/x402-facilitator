@@ -8,11 +8,11 @@ import (
 // VerificationResult is the outcome of consulting MinIndependentEndpoints
 // independent RPC nodes for a block.
 type VerificationResult struct {
-	OK           bool
+	OK             bool
 	ConfirmedSends int
-	Consulted    int
-	Reason       string
-	Payer        string
+	Consulted      int
+	Reason         string
+	Payer          string
 }
 
 // VerifyBlock consults at least MinIndependentEndpoints independent RPC
@@ -31,11 +31,17 @@ func VerifyBlock(
 	blockHash, payTo, amountRaw string,
 ) VerificationResult {
 	active := make([]string, 0, len(endpoints))
+	seen := make(map[string]bool)
 	for _, e := range endpoints {
 		e = strings.TrimSpace(e)
-		if e != "" {
-			active = append(active, e)
+		if e == "" {
+			continue
 		}
+		if seen[e] {
+			continue
+		}
+		seen[e] = true
+		active = append(active, e)
 	}
 	if len(active) < MinIndependentEndpoints {
 		return VerificationResult{
@@ -68,9 +74,6 @@ func VerifyBlock(
 		if strings.TrimSpace(bf.AmountRaw) != amountRaw {
 			return VerificationResult{OK: false, Consulted: consulted, Reason: "block amount does not match required amount"}
 		}
-		if !bf.Confirmed {
-			return VerificationResult{OK: false, Consulted: consulted, Reason: "block is not confirmed"}
-		}
 		if payer == "" {
 			payer = bf.Account
 		}
@@ -79,7 +82,7 @@ func VerifyBlock(
 
 	// Every consulted endpoint agreed: all must be confirmed sends matching
 	// amount and destination. If any endpoint disagreed we already returned.
-	if confirmed < len(active) || confirmed < MinIndependentEndpoints {
+	if len(active)-confirmed != 0 || confirmed < MinIndependentEndpoints {
 		return VerificationResult{OK: false, Consulted: consulted, Reason: "insufficient confirming endpoints"}
 	}
 	return VerificationResult{OK: true, ConfirmedSends: confirmed, Consulted: consulted, Payer: payer}

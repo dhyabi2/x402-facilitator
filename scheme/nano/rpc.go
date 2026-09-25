@@ -52,15 +52,18 @@ func NewClientWithCallback(call Callback) *Client {
 	return &Client{call: call}
 }
 
-func (c *Client) post(endpoint string, body map[string]interface{}) (map[string]interface{}, error) {
+func (c *Client) post(ctx context.Context, endpoint string, body map[string]interface{}) (map[string]interface{}, error) {
 	if c != nil && c.call != nil {
 		return c.call(endpoint, body)
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 	payload, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
 	}
-	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +73,7 @@ func (c *Client) post(endpoint string, body map[string]interface{}) (map[string]
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
 	if err != nil {
 		return nil, err
@@ -94,10 +97,10 @@ func (c *Client) BlockInfo(ctx context.Context, endpoint, hash string) (*BlockFi
 	if c == nil {
 		return nil, fmt.Errorf("nano client is nil")
 	}
-	obj, err := c.post(endpoint, map[string]interface{}{
-		"action":      "block_info",
-		"json_block":  "true",
-		"hash":        hash,
+	obj, err := c.post(ctx, endpoint, map[string]interface{}{
+		"action":     "block_info",
+		"json_block": "true",
+		"hash":       hash,
 	})
 	if err != nil {
 		return nil, err
@@ -112,13 +115,24 @@ func (c *Client) BlockInfo(ctx context.Context, endpoint, hash string) (*BlockFi
 // unset so the caller's fail-closed rules reject it rather than guess.
 func NormalizeBlockInfo(raw map[string]interface{}) *BlockFields {
 	b := &BlockFields{}
-	// Subtype/type lives at contents.type (real shape) or type/subtype.
+	// Subtype: modern state blocks put the direction at the TOP-LEVEL
+	// "subtype" field (send/receive); legacy blocks carry it at
+	// contents.type and never as "state". Never treat the block type
+	// "state" itself as a subtype.
 	contents, _ := raw["contents"].(map[string]interface{})
-	subtype := firstString(contents, "type", "subtype")
+	subtype := firstString(raw, "subtype")
 	if subtype == "" {
-		subtype = firstString(raw, "type", "subtype")
+		st := firstString(contents, "type")
+		if st != "" && st != "state" {
+			subtype = st
+		} else {
+			subtype = firstString(raw, "type")
+		}
 	}
 	b.Subtype = subtype
+	if b.Subtype == "state" {
+		b.Subtype = ""
+	}
 
 	// Destination: contents.destination | contents.link_as_account | contents.link |
 	// or top-level link_as_account | destination | link.

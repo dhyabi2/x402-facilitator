@@ -30,13 +30,13 @@ const NanoFacilitatorURLEnv = "NANO_FACILITATOR_RPC_URLS"
 // NanoFacilitator settles x402 "exact" payments on Nano. It verifies a payment
 // block on at least two independent RPC nodes and binds it exactly once.
 type NanoFacilitator struct {
-	scheme     types.Scheme
-	network    string
-	client     *nanoscheme.Client
-	endpoints  []string
-	claims     *ClaimStore
-	asset      string
-	decimals   int
+	scheme      types.Scheme
+	network     string
+	client      *nanoscheme.Client
+	endpoints   []string
+	claims      *ClaimStore
+	asset       string
+	decimals    int
 	networkName string
 }
 
@@ -114,18 +114,29 @@ func (t *NanoFacilitator) Verify(ctx context.Context, payload *types.PaymentPayl
 	}
 
 	res := nanoscheme.VerifyBlock(ctx, t.client, t.endpoints, blockHash, req.PayTo, req.Amount)
+	// The block's real payer (read from the ledger) is authoritative. A
+	// non-empty payer supplied in the payload that CONTRADICTS the block is
+	// rejected outright rather than trusted; the payload value is never used
+	// for payer attribution.
+	if res.Payer != "" && payerFromPayload != "" && !strings.EqualFold(strings.TrimSpace(payerFromPayload), strings.TrimSpace(res.Payer)) {
+		return &types.PaymentVerifyResponse{
+			IsValid:        false,
+			InvalidReason:  types.ErrInvalidPayloadFormat.Error(),
+			InvalidMessage: "payment proof payer contradicts the block's payer",
+		}, nil
+	}
 	if !res.OK {
 		return &types.PaymentVerifyResponse{
 			IsValid:        false,
 			InvalidReason:  verifyReason(res.Reason),
 			InvalidMessage: res.Reason,
-			Payer:          payerOrDefault(payerFromPayload, res.Payer),
+			Payer:          res.Payer,
 		}, nil
 	}
 
 	return &types.PaymentVerifyResponse{
 		IsValid: true,
-		Payer:   payerOrDefault(payerFromPayload, res.Payer),
+		Payer:   res.Payer,
 	}, nil
 }
 
@@ -195,12 +206,14 @@ func (t *NanoFacilitator) Supported() *types.SupportedResponse {
 
 // nanoProof extracts the send-block hash (the payment proof) from a payload.
 // On Nano the payer broadcasts the send and includes its block hash so the
-// facilitator can verify it on the ledger.
+// facilitator can verify it on the ledger. The returned hash is normalized to
+// uppercase so case variants share one canonical claim key and one
+// RPC-compatible hash.
 func nanoProof(payload *types.PaymentPayload) (blockHash string, payer string, invalid *types.PaymentVerifyResponse) {
 	if payload.Payload["blockHash"] == nil && payload.Payload["transaction"] == nil && payload.Payload["paymentProof"] == nil {
 		return "", "", &types.PaymentVerifyResponse{
-			IsValid:       false,
-			InvalidReason: types.ErrInvalidPayloadFormat.Error(),
+			IsValid:        false,
+			InvalidReason:  types.ErrInvalidPayloadFormat.Error(),
 			InvalidMessage: "nano payment payload requires a blockHash",
 		}
 	}
@@ -211,11 +224,11 @@ func nanoProof(payload *types.PaymentPayload) (blockHash string, payer string, i
 			break
 		}
 	}
-	h = strings.TrimSpace(h)
+	h = strings.ToUpper(strings.TrimSpace(h))
 	if !nanoscheme.IsBlockHash(h) {
 		return "", "", &types.PaymentVerifyResponse{
-			IsValid:       false,
-			InvalidReason: types.ErrInvalidTransaction.Error(),
+			IsValid:        false,
+			InvalidReason:  types.ErrInvalidTransaction.Error(),
 			InvalidMessage: "payment proof is not a 64-hex Nano block hash",
 		}
 	}
@@ -254,7 +267,7 @@ func (t *NanoFacilitator) validatePaymentEnvelope(payload *types.PaymentPayload,
 			InvalidReason: types.ErrAmountMismatch.Error(),
 		}
 	}
-	if strings.ToLower(strings.TrimSpace(payload.Accepted.PayTo)) != strings.ToLower(strings.TrimSpace(req.PayTo)) ||
+	if !strings.EqualFold(strings.TrimSpace(payload.Accepted.PayTo), strings.TrimSpace(req.PayTo)) ||
 		strings.TrimSpace(req.PayTo) == "" {
 		return &types.PaymentVerifyResponse{
 			IsValid:       false,
@@ -280,11 +293,4 @@ func verifyReason(reason string) string {
 		}
 		return reason
 	}
-}
-
-func payerOrDefault(payer, fallback string) string {
-	if strings.TrimSpace(payer) != "" {
-		return payer
-	}
-	return fallback
 }

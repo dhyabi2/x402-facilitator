@@ -36,11 +36,11 @@ func TestNormalizeBlockInfoRealShape(t *testing.T) {
 func TestNormalizeBlockInfoAliasKeys(t *testing.T) {
 	// Some nodes expose alternate key names; the normalizer must tolerate them.
 	raw := map[string]interface{}{
-		"account":       "nano_1x",
+		"account":         "nano_1x",
 		"link_as_account": "nano_2y",
-		"amount":        "1",
-		"confirmed":     true,
-		"type":          "send",
+		"amount":          "1",
+		"confirmed":       true,
+		"type":            "send",
 	}
 	b := NormalizeBlockInfo(raw)
 	if b.Subtype != "send" || b.Account != "nano_1x" || b.Destination != "nano_2y" || !b.Confirmed {
@@ -58,6 +58,46 @@ func TestNormalizeBlockInfoFailClosedMissingConfirmed(t *testing.T) {
 	}
 	if b.Destination != "" || b.Subtype != "send" {
 		t.Fatalf("unexpected normalisation: %+v", b)
+	}
+}
+
+func TestNormalizeBlockInfoStateSendTopLevelSubtype(t *testing.T) {
+	// A real modern STATE send block: the direction lives at the TOP-LEVEL
+	// subtype field and contents.type is "state"; the destination is in
+	// contents.link_as_account. "state" itself must never be treated as the
+	// subtype.
+	raw := map[string]interface{}{
+		"block_account": "nano_3t6k35gi95xu6tergt6p69ck76ogmitsa8mnijtpxm9fkcm736xtoncuohr3",
+		"amount":        "1",
+		"confirmed":     "true",
+		"subtype":       "send",
+		"contents": map[string]interface{}{
+			"type":            "state",
+			"link_as_account": "nano_1111111111111111111111111111111111111111111111111111hifc8npp",
+		},
+	}
+	b := NormalizeBlockInfo(raw)
+	if b.Subtype != "send" {
+		t.Fatalf("state block subtype = %q, want send", b.Subtype)
+	}
+	if b.Destination != "nano_1111111111111111111111111111111111111111111111111111hifc8npp" {
+		t.Fatalf("destination = %q", b.Destination)
+	}
+}
+
+func TestNormalizeBlockInfoStateTypeNotSubtype(t *testing.T) {
+	// A state block WITHOUT a subtype field must not leak "state" as the
+	// subtype; fail closed on an empty subtype instead.
+	raw := map[string]interface{}{
+		"confirmed": "true",
+		"contents":  map[string]interface{}{"type": "state"},
+	}
+	b := NormalizeBlockInfo(raw)
+	if b.Subtype == "state" {
+		t.Fatalf("block type 'state' must not be reported as a subtype")
+	}
+	if b.Subtype != "" {
+		t.Fatalf("subtype = %q, want empty when no direction is present", b.Subtype)
 	}
 }
 
