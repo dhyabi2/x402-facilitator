@@ -295,23 +295,21 @@
  ],
  "contested": [],
  "probe": {
-  "score": 67,
+  "score": 100,
   "results": [
    {
     "id": "L0",
     "pass": true,
     "oracle_exit": 0,
     "oracle_ok": true,
-    "cached": true,
     "judge": "deepseek/deepseek-v4-flash-0731",
     "control": "passed"
    },
    {
     "id": "L1",
-    "pass": false,
+    "pass": true,
     "oracle_exit": 0,
     "oracle_ok": true,
-    "cached": true,
     "judge": "deepseek/deepseek-v4-flash-0731",
     "control": "passed"
    },
@@ -320,12 +318,11 @@
     "pass": true,
     "oracle_exit": 0,
     "oracle_ok": true,
-    "cached": true,
     "judge": "deepseek/deepseek-v4-flash-0731",
     "control": "passed"
    }
   ],
-  "at": "2026-09-25T15:38:47+00:00"
+  "at": "2026-09-25T15:42:15+00:00"
  },
  "events": [
   {
@@ -518,6 +515,15 @@
    "at": "2026-09-25T15:38:47+00:00",
    "prev": "e6c30debc29d21ece4c31d9eb3b30760752cea389ffd44e46deebab39bc5dd72",
    "receipt": "51a26c6314c35fc34698d27917bc900db0ce446122090994e3bc2a16f0b59ae3"
+  },
+  {
+   "kind": "probe",
+   "payload": {
+    "score": 100
+   },
+   "at": "2026-09-25T15:42:15+00:00",
+   "prev": "51a26c6314c35fc34698d27917bc900db0ce446122090994e3bc2a16f0b59ae3",
+   "receipt": "91327d523734f9b751e70bf5f08ea9d218909a7ac17ffceccbe6b745f9da11c3"
   }
  ]
 }
