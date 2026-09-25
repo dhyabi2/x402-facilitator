@@ -302,6 +302,7 @@
     "pass": true,
     "oracle_exit": 0,
     "oracle_ok": true,
+    "cached": true,
     "judge": "deepseek/deepseek-v4-flash-0731",
     "control": "passed"
    },
@@ -310,6 +311,7 @@
     "pass": false,
     "oracle_exit": 0,
     "oracle_ok": true,
+    "cached": true,
     "judge": "deepseek/deepseek-v4-flash-0731",
     "control": "passed"
    },
@@ -318,11 +320,12 @@
     "pass": true,
     "oracle_exit": 0,
     "oracle_ok": true,
+    "cached": true,
     "judge": "deepseek/deepseek-v4-flash-0731",
     "control": "passed"
    }
   ],
-  "at": "2026-09-25T15:35:34+00:00"
+  "at": "2026-09-25T15:38:47+00:00"
  },
  "events": [
   {
@@ -506,6 +509,15 @@
    "at": "2026-09-25T15:35:34+00:00",
    "prev": "200140fa93e1916e561a7147d3e29d728cf7fe76e3cb2550455ddb398e0e2b34",
    "receipt": "e6c30debc29d21ece4c31d9eb3b30760752cea389ffd44e46deebab39bc5dd72"
+  },
+  {
+   "kind": "probe",
+   "payload": {
+    "score": 67
+   },
+   "at": "2026-09-25T15:38:47+00:00",
+   "prev": "e6c30debc29d21ece4c31d9eb3b30760752cea389ffd44e46deebab39bc5dd72",
+   "receipt": "51a26c6314c35fc34698d27917bc900db0ce446122090994e3bc2a16f0b59ae3"
   }
  ]
 }
