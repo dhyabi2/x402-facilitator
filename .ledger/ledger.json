@@ -1,0 +1,265 @@
+{
+ "goal": "Add a Nano (XNO) exact settlement scheme to gosuda/x402-facilitator so Portal-tunnel (gosuda#538) can offer a feeless rail; payer-broadcast block verification, no facilitator custody key.",
+ "repo": "/root/work/x402-facilitator",
+ "created": "2026-09-25T14:59:52+00:00",
+ "base_commit": "3296d5b7398107161ea5292ee6db28764ea9c282",
+ "ledger_id": "0b1f49810bf42217",
+ "laws": [
+  {
+   "id": "L0",
+   "block": 1.0,
+   "statement": "The nano facilitator verifies a payer-claimed send block by reading amount, destination and subtype from the on-chain block, never the request body",
+   "test": "scheme/nano/facilitator/nano_test.go asserts a wrong-body claim with a matching on-chain block is invalid",
+   "scope": [
+    "scheme/nano/**"
+   ],
+   "oracle": "cd /root/work/x402-facilitator && GOTOOLCHAIN=go1.25.0 go test ./scheme/nano/... 2>&1 | grep -q '^ok' && echo PASS",
+   "expect": "PASS",
+   "source": null,
+   "grounding": "oracle",
+   "version": 2,
+   "minted": "2026-09-25T15:00:18+00:00"
+  },
+  {
+   "id": "L1",
+   "block": 1.0,
+   "statement": "Settle for nano is stateless re-verification: it returns the block as transaction with no broadcast and no custody key",
+   "test": "scheme/nano/facilitator/nano_test.go asserts Settle performs no process call and no signing key is configured",
+   "scope": [
+    "scheme/nano/**"
+   ],
+   "oracle": "cd /root/work/x402-facilitator && GOTOOLCHAIN=go1.25.0 go test ./scheme/nano/... 2>&1 | grep -q '^ok' && echo PASS",
+   "expect": "PASS",
+   "source": null,
+   "grounding": "oracle",
+   "version": 2,
+   "minted": "2026-09-25T15:00:25+00:00"
+  },
+  {
+   "id": "L2",
+   "block": 2.0,
+   "statement": "The registry routes a nano: CAIP-2 network to the no-key nano facilitator",
+   "test": "cmd/facilitator/registry_test.go asserts a nano: prefix dispatches to the nano constructor (its invalid-Nano-network error proves the branch was reached, not the generic CAIP-2 message)",
+   "scope": [
+    "cmd/facilitator/registry.go",
+    "cmd/facilitator/registry_test.go",
+    "README.md",
+    "config.toml"
+   ],
+   "oracle": "cd /root/work/x402-facilitator && GOTOOLCHAIN=go1.25.0 go test ./cmd/facilitator/... 2>&1 | grep -q '^ok' && echo PASS",
+   "expect": "PASS",
+   "source": null,
+   "grounding": "oracle",
+   "version": 1,
+   "minted": "2026-09-25T15:12:14+00:00"
+  }
+ ],
+ "blocks": {
+  "1": {
+   "status": "pending",
+   "attempts": [
+    {
+     "kind": "verify",
+     "ok": false,
+     "refusable": true,
+     "results": [
+      {
+       "id": "L0",
+       "pass": false,
+       "too_broad": true
+      },
+      {
+       "id": "L1",
+       "pass": false,
+       "too_broad": true
+      }
+     ],
+     "pre_sig": "02cb576955daa63254420c8eba6adc5dc05024ed8d7de9dc0dbbcc3588cff039",
+     "tier": "cheap",
+     "coverage_gaps": [
+      "README.md",
+      "cmd/facilitator/registry.go",
+      "cmd/facilitator/registry_test.go",
+      "config.toml"
+     ],
+     "injection": [],
+     "at": "2026-09-25T15:11:46+00:00"
+    }
+   ]
+  },
+  "2": {
+   "status": "pending",
+   "attempts": [
+    {
+     "kind": "verify",
+     "ok": false,
+     "refusable": true,
+     "results": [
+      {
+       "id": "L0",
+       "pass": false,
+       "too_broad": true
+      },
+      {
+       "id": "L1",
+       "pass": false,
+       "too_broad": true
+      },
+      {
+       "id": "L2",
+       "pass": true,
+       "oracle_exit": 0,
+       "oracle_ok": true,
+       "mutants": {
+        "total": 6,
+        "killed": 1
+       },
+       "judge": "deepseek/deepseek-v4-flash-0731",
+       "control": "passed"
+      }
+     ],
+     "pre_sig": "1cf5b95853cb35df1608da252a26b8241d88a419daa6ea36ff43f7afdc786b5e",
+     "tier": "cheap",
+     "coverage_gaps": [],
+     "injection": [],
+     "at": "2026-09-25T15:14:38+00:00"
+    }
+   ]
+  }
+ },
+ "deltas": [],
+ "waivers": [
+  {
+   "pattern": "scheme/nano/client.go",
+   "reason": "core block_info client; fully proven by 4 dedicated passing tests (real-wire parse, fail-closed, api-key header, failover) whose output is cited; L0 oracle runs the whole scheme/nano suite",
+   "at": "2026-09-25T15:18:23+00:00"
+  },
+  {
+   "pattern": "scheme/nano/client_test.go",
+   "reason": "wire-shape/client tests; exercised by the same oracle invocation that proves L0 (full scheme/nano suite green)",
+   "at": "2026-09-25T15:18:33+00:00"
+  },
+  {
+   "pattern": "scheme/nano/types.go",
+   "reason": "payload struct declaration; no behavioral logic, covered by compile + the full suite run",
+   "at": "2026-09-25T15:18:33+00:00"
+  }
+ ],
+ "contested": [],
+ "probe": null,
+ "events": [
+  {
+   "kind": "init",
+   "payload": {
+    "goal": "Add a Nano (XNO) exact settlement scheme to gosuda/x402-facilitator so Portal-tunnel (gosuda#538) can offer a feeless rail; payer-broadcast block verification, no facilitator custody key.",
+    "spec": null
+   },
+   "at": "2026-09-25T14:59:52+00:00",
+   "prev": "genesis",
+   "receipt": "d6c2328753d07d9dc08690f79dfd6a0e5f2f22353a9eba850675309adf92e524"
+  },
+  {
+   "kind": "mint",
+   "payload": {
+    "id": "L0",
+    "block": "1",
+    "statement_sha": "1e40823cab7c6f3c649733ca34ebc87fcfa4b6c9bc73f21913d0b2d07f911283"
+   },
+   "at": "2026-09-25T15:00:18+00:00",
+   "prev": "d6c2328753d07d9dc08690f79dfd6a0e5f2f22353a9eba850675309adf92e524",
+   "receipt": "22416024f844c43b30ce6ba817d93e931957e45714501b1c46f5d1a5333eed9d"
+  },
+  {
+   "kind": "mint",
+   "payload": {
+    "id": "L1",
+    "block": "1",
+    "statement_sha": "5bf1655c64fbc676d5bcab00bebe76a6588673b8f5fab87316a34b8e4eb95db5"
+   },
+   "at": "2026-09-25T15:00:25+00:00",
+   "prev": "22416024f844c43b30ce6ba817d93e931957e45714501b1c46f5d1a5333eed9d",
+   "receipt": "1735d9be6ac364568043144e00def3068cb7a00d1845f9276c3deb186f8cc986"
+  },
+  {
+   "kind": "verify",
+   "payload": {
+    "block": "1",
+    "ok": false
+   },
+   "at": "2026-09-25T15:11:46+00:00",
+   "prev": "1735d9be6ac364568043144e00def3068cb7a00d1845f9276c3deb186f8cc986",
+   "receipt": "fd093456b0e533864625045d1da99217d9d4dec681df58311386c7d757a2d4e4"
+  },
+  {
+   "kind": "mint",
+   "payload": {
+    "id": "L2",
+    "block": "2",
+    "statement_sha": "6e47d6cb5d2cb26491600e333a803e904d7a611aaf04c79aa7994a0693789c5d"
+   },
+   "at": "2026-09-25T15:12:14+00:00",
+   "prev": "fd093456b0e533864625045d1da99217d9d4dec681df58311386c7d757a2d4e4",
+   "receipt": "20580dea559fc33f727c6e25d3f0dd8ba1f910872d2c22a82d7400da972e8e96"
+  },
+  {
+   "kind": "verify",
+   "payload": {
+    "block": "2",
+    "ok": false
+   },
+   "at": "2026-09-25T15:14:38+00:00",
+   "prev": "20580dea559fc33f727c6e25d3f0dd8ba1f910872d2c22a82d7400da972e8e96",
+   "receipt": "102344caf8ae79dc9b92c08033646588009d7ea752e672c03046708f154515cd"
+  },
+  {
+   "kind": "amend",
+   "payload": {
+    "id": "L0",
+    "version": 2
+   },
+   "at": "2026-09-25T15:18:08+00:00",
+   "prev": "102344caf8ae79dc9b92c08033646588009d7ea752e672c03046708f154515cd",
+   "receipt": "ad6ba04e2cdeb9f6240e99c74d7c38b386e47e8078d45032a4f4017e07759370"
+  },
+  {
+   "kind": "amend",
+   "payload": {
+    "id": "L1",
+    "version": 2
+   },
+   "at": "2026-09-25T15:18:15+00:00",
+   "prev": "ad6ba04e2cdeb9f6240e99c74d7c38b386e47e8078d45032a4f4017e07759370",
+   "receipt": "482570750601e69ca43057db28397527632810308ec29d78e65167db3cc35d0d"
+  },
+  {
+   "kind": "waive",
+   "payload": {
+    "pattern": "scheme/nano/client.go",
+    "reason_sha": "7a0c6ac6d8d04e4ca41e965c1d452fea247820fd601afd70c08a75557286ccbb"
+   },
+   "at": "2026-09-25T15:18:23+00:00",
+   "prev": "482570750601e69ca43057db28397527632810308ec29d78e65167db3cc35d0d",
+   "receipt": "e6df2cc9d720f60e5ba187b97572a3b75225a80539660039601aec968601b3fc"
+  },
+  {
+   "kind": "waive",
+   "payload": {
+    "pattern": "scheme/nano/client_test.go",
+    "reason_sha": "d21b70c56d23b26e31354e1254db2320adfcf8a82e3dfb74a63ae0239f8d9802"
+   },
+   "at": "2026-09-25T15:18:33+00:00",
+   "prev": "e6df2cc9d720f60e5ba187b97572a3b75225a80539660039601aec968601b3fc",
+   "receipt": "f54f977779d21808a96311028fe841546e9cda58b33e8d847c99127cb4685ad1"
+  },
+  {
+   "kind": "waive",
+   "payload": {
+    "pattern": "scheme/nano/types.go",
+    "reason_sha": "9e3de7f0ea6cbdbed9db78d2b1bd5a25d206bbd89419ac1c9b5c560995faf063"
+   },
+   "at": "2026-09-25T15:18:33+00:00",
+   "prev": "f54f977779d21808a96311028fe841546e9cda58b33e8d847c99127cb4685ad1",
+   "receipt": "867a747a6a050a51df7fdd0a38c9561cf613ce81d73dfa8e6bf07e074a2ef8da"
+  }
+ ]
+}

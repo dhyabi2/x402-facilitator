@@ -1,0 +1,68 @@
+=== RUN   TestClientParsesRealBlockInfoShape
+--- PASS: TestClientParsesRealBlockInfoShape (0.01s)
+=== RUN   TestClientFailsClosedOnNodeError
+--- PASS: TestClientFailsClosedOnNodeError (0.00s)
+=== RUN   TestClientSendsAPIKeyHeaderWhenConfigured
+--- PASS: TestClientSendsAPIKeyHeaderWhenConfigured (0.00s)
+=== RUN   TestClientTriesNextEndpointOnFailure
+--- PASS: TestClientTriesNextEndpointOnFailure (0.00s)
+PASS
+ok  	github.com/gosuda/x402-facilitator/scheme/nano	0.025s
+=== RUN   TestNewNanoFacilitatorValidatesInputs
+--- PASS: TestNewNanoFacilitatorValidatesInputs (0.00s)
+=== RUN   TestNewNanoFacilitatorAcceptsExplicitEndpoint
+--- PASS: TestNewNanoFacilitatorAcceptsExplicitEndpoint (0.00s)
+=== RUN   TestSupportedAdvertisesNano
+--- PASS: TestSupportedAdvertisesNano (0.00s)
+=== RUN   TestNanoVerifyRejectsInvalidEnvelopes
+=== RUN   TestNanoVerifyRejectsInvalidEnvelopes/wrong_version
+=== RUN   TestNanoVerifyRejectsInvalidEnvelopes/wrong_scheme
+=== RUN   TestNanoVerifyRejectsInvalidEnvelopes/wrong_network
+=== RUN   TestNanoVerifyRejectsInvalidEnvelopes/accepted_amount_drift
+=== RUN   TestNanoVerifyRejectsInvalidEnvelopes/accepted_payTo_drift
+=== RUN   TestNanoVerifyRejectsInvalidEnvelopes/empty_payTo
+--- PASS: TestNanoVerifyRejectsInvalidEnvelopes (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidEnvelopes/wrong_version (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidEnvelopes/wrong_scheme (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidEnvelopes/wrong_network (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidEnvelopes/accepted_amount_drift (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidEnvelopes/accepted_payTo_drift (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidEnvelopes/empty_payTo (0.00s)
+=== RUN   TestNanoVerifyRejectsMalformedPayload
+=== RUN   TestNanoVerifyRejectsMalformedPayload/missing_blockHash
+=== RUN   TestNanoVerifyRejectsMalformedPayload/not_hex_blockHash
+--- PASS: TestNanoVerifyRejectsMalformedPayload (0.00s)
+    --- PASS: TestNanoVerifyRejectsMalformedPayload/missing_blockHash (0.00s)
+    --- PASS: TestNanoVerifyRejectsMalformedPayload/not_hex_blockHash (0.00s)
+=== RUN   TestNanoVerifyRejectsNodeFailures
+=== RUN   TestNanoVerifyRejectsNodeFailures/node_error
+=== RUN   TestNanoVerifyRejectsNodeFailures/block_not_found
+--- PASS: TestNanoVerifyRejectsNodeFailures (0.00s)
+    --- PASS: TestNanoVerifyRejectsNodeFailures/node_error (0.00s)
+    --- PASS: TestNanoVerifyRejectsNodeFailures/block_not_found (0.00s)
+=== RUN   TestNanoVerifyRejectsInvalidBlocks
+=== RUN   TestNanoVerifyRejectsInvalidBlocks/receive_subtype
+=== RUN   TestNanoVerifyRejectsInvalidBlocks/wrong_destination
+=== RUN   TestNanoVerifyRejectsInvalidBlocks/wrong_amount
+=== RUN   TestNanoVerifyRejectsInvalidBlocks/unconfirmed_when_required
+--- PASS: TestNanoVerifyRejectsInvalidBlocks (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidBlocks/receive_subtype (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidBlocks/wrong_destination (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidBlocks/wrong_amount (0.00s)
+    --- PASS: TestNanoVerifyRejectsInvalidBlocks/unconfirmed_when_required (0.00s)
+=== RUN   TestNanoVerifyNoRPCWhenNotRequired
+--- PASS: TestNanoVerifyNoRPCWhenNotRequired (0.00s)
+=== RUN   TestNanoVerifyAcceptsValidPayment
+--- PASS: TestNanoVerifyAcceptsValidPayment (0.00s)
+=== RUN   TestNanoVerifyAcceptsCementedWhenRequired
+--- PASS: TestNanoVerifyAcceptsCementedWhenRequired (0.00s)
+=== RUN   TestNanoSettleIsStatelessReVerification
+--- PASS: TestNanoSettleIsStatelessReVerification (0.00s)
+=== RUN   TestNanoSettleRejectsInvalid
+--- PASS: TestNanoSettleRejectsInvalid (0.00s)
+=== RUN   TestNanoSettleRejectsNilInputs
+--- PASS: TestNanoSettleRejectsNilInputs (0.00s)
+=== RUN   TestRawAmountEqual
+--- PASS: TestRawAmountEqual (0.00s)
+PASS
+ok  	github.com/gosuda/x402-facilitator/scheme/nano/facilitator	0.017s

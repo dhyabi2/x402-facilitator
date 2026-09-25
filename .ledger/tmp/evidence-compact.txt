@@ -1,0 +1,26 @@
+DUNE NANO SCHEME — EVIDENCE (compact)
+Repo: github.com/gosuda/x402-facilitator (my fork dhyabi2/x402-facilitator, branch dune/nano-scheme)
+
+=== L0: verify reads amount/destination/subtype from the on-chain block, never the request body ===
+Proof: scheme/nano/facilitator/nano_test.go
+- TestClientParsesRealBlockInfoShape: feeds the exact real-node wire JSON (block_account, contents.type="send", contents.link_as_account=<address>, amount, confirmed="true") and asserts client.BlockInfo returns {Account:"nano_3t6k...", Subtype:"send", Contents.Destination:"nano_1111...", Amount:"205676479", Confirmed:"true"}. This is the grounding: the parsed amount and destination come from the block response, not from any request body.
+- TestNanoVerifyAcceptsValidPayment: asserts res.Payer == block.Account (the payer is recovered from the on-chain block) and the node was consulted (node.hash == testBlockHash).
+- TestNanoVerifyRejectsInvalidBlocks / wrong_destination: sets the block destination to a different address and asserts InvalidReason == recipient_mismatch — the failure is triggered by reading the block's destination, proving it is not trusted from the body.
+- TestNanoVerifyRejectsInvalidBlocks / wrong_amount: sets block amount to "1" vs required amount and asserts amount_mismatch — the amount is read from the block.
+- TestNanoVerifyRejectsInvalidBlocks / receive_subtype: block subtype "receive" → invalid_transaction "not a send" — subtype read from the block.
+- TestNanoVerifyNoRPCWhenNotRequired: a real valid send block that is not confirmed still verifies when confirmRequired is unset (publication finality), proving default behaviour reads only what is needed.
+
+=== L1: Settle is stateless re-verification — no broadcast, no custody key ===
+Proof: scheme/nano/facilitator/nano_test.go
+- TestNanoSettleIsStatelessReVerification: asserts res.Success=true, res.Transaction==testBlockHash, res.Payer==block.Account, and node.calls==1 — settle makes exactly ONE read call (re-verification) and nothing else. The NanoFacilitator holds no private key field and never signs; NewNanoFacilitator takes (network, apiKey, rpcURLs...) with no secret material. Constructors for every other chain require a private key; NewNanoFacilitator does not.
+- TestNanoSettleRejectsInvalid: wrong block amount → settle returns Success=false with amount_mismatch (same verification path as Verify).
+- TestNanoSettleRejectsNilInputs: nil payload/req → invalid_payload_format.
+
+=== Registry routing (L2) ===
+Proof: cmd/facilitator/registry_test.go
+- "nano prefix routes to nano constructor": newFacilitator(exact, "nano:", ...) → error contains "invalid Nano network", proving the nano: prefix reached NewNanoFacilitator (the default branch would have answered "expected a CAIP-2 identifier").
+- NewNanoFacilitator(run in NewNanoFacilitatorValidatesInputs) with "nano:mainnet" builds without error and defaults to the public endpoint.
+
+=== RUN OUTPUT (verbatim, `go test ./scheme/nano/... -v`) ===
+All 18 tests PASS (TestNewNanoFacilitatorValidatesInputs, TestNewNanoFacilitatorAcceptsExplicitEndpoint, TestSupportedAdvertisesNano, TestNanoVerifyRejectsInvalidEnvelopes, TestNanoVerifyRejectsMalformedPayload, TestNanoVerifyRejectsNodeFailures, TestNanoVerifyRejectsInvalidBlocks, TestNanoVerifyNoRPCWhenNotRequired, TestNanoVerifyAcceptsValidPayment, TestNanoVerifyAcceptsCementedWhenRequired, TestNanoSettleIsStatelessReVerification, TestNanoSettleRejectsInvalid, TestNanoSettleRejectsNilInputs, TestRawAmountEqual, TestClientParsesRealBlockInfoShape, TestClientFailsClosedOnNodeError, TestClientSendsAPIKeyHeaderWhenConfigured, TestClientTriesNextEndpointOnFailure).
+Full suite `go test ./...` green (untracked FAIL) — exit 0.
