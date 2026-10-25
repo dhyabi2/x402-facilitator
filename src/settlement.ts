@@ -11,6 +11,7 @@
  *   EIP-3009 : payload.authorization.{ from, nonce }
  *   Permit2  : payload.permit2Authorization.{ from, nonce }
  *   GasFree  : payload.gasfree.{ user, nonce }   (TRON only)
+ *   Nano     : payload.nano.{ account, blockHash } (feeless exact; block hash is the proof)
  *
  * batch-settlement has no per-payment authorization nonce — a payment channel is
  * claimed repeatedly — so it yields the channel payer with a null nonce: enough to
@@ -41,6 +42,11 @@ interface ChannelPayerHolder {
   payer: string;
 }
 
+interface NanoBlockSend {
+  account: string;
+  blockHash: string;
+}
+
 function hasFromNonce(v: unknown): v is FromNonce {
   return typeof v === "object" && v !== null &&
     typeof (v as FromNonce).from === "string" &&
@@ -55,6 +61,12 @@ function hasUserNonce(v: unknown): v is UserNonce {
 
 function hasPayer(v: unknown): v is ChannelPayerHolder {
   return typeof v === "object" && v !== null && typeof (v as ChannelPayerHolder).payer === "string";
+}
+
+function hasNanoBlockSend(v: unknown): v is NanoBlockSend {
+  return typeof v === "object" && v !== null &&
+    typeof (v as NanoBlockSend).account === "string" &&
+    typeof (v as NanoBlockSend).blockHash === "string";
 }
 
 /**
@@ -79,6 +91,13 @@ export function extractPayerNonce(payload: Record<string, unknown> | undefined):
   const gasfree = payload.gasfree;
   if (hasUserNonce(gasfree)) {
     return { payer: gasfree.user, nonce: gasfree.nonce };
+  }
+
+  // Nano: the payer's own signed send block is the settlement —
+  // the block hash is the proof, not an authorisation nonce.
+  const nano = payload.nano;
+  if (hasNanoBlockSend(nano)) {
+    return { payer: nano.account, nonce: nano.blockHash };
   }
 
   // batch-settlement: payer on the channel config, no per-payment nonce.

@@ -7,7 +7,7 @@
  */
 import { TRON_MAINNET, TRON_NILE, TRON_SHASTA, normalizeTronNetwork } from "@bankofai/x402-tron";
 
-export type NetworkFamily = "tron" | "evm";
+export type NetworkFamily = "tron" | "evm" | "nano";
 
 /**
  * Canonical CAIP-2 identifier (e.g. "eip155:97", "tron:0xcd8690dc").
@@ -71,6 +71,11 @@ const REGISTRY: readonly NetworkEntry[] = [
     family: "evm",
     rpc: "https://sepolia.base.org",
     chainId: 84532,
+  },
+  {
+    canonical: "nano:mainnet" as CanonicalNetwork,
+    family: "nano",
+    rpc: "https://rpc.nano.to",
   },
 ];
 
